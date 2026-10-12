@@ -367,7 +367,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 			`<!-- table-fields id="${id}" v="1"\n` +
 			`cols:\n` +
 			cols.join("\n") +
-			`\n-->\n`;
+			`\n-->\n\n`; // empty line before the table, or Obsidian does not render it as a table
 
 		editor.replaceRange(comment, { line: top, ch: 0 });
 		new Notice(`Table Fields: marked "${id}" (${headerCells.length} columns). Edit the comment to set column types.`);
@@ -699,7 +699,7 @@ function buildUsageMd(img) {
 	"",
 	"## Set up a table",
 	"",
-	"Put a small config comment directly above a normal pipe table:",
+	"Put a small config comment above a normal pipe table, with one empty line in between:",
 	"",
 	"    <!-- table-fields id=\"tasks\" v=\"1\"",
 	"    cols:",
@@ -708,6 +708,7 @@ function buildUsageMd(img) {
 	"      - {name: \"Due\",    type: \"date\"}",
 	"      - {name: \"Done\",   type: \"checkbox\"}",
 	"    -->",
+	"",
 	"    | Task      | Status | Due        | Done |",
 	"    | --------- | ------ | ---------- | ---- |",
 	"    | Draft PRD | Doing  | 2026-07-22 | [x]  |",
@@ -747,8 +748,8 @@ const SKILL_TEXT = [
 	"syntax and storage rules below. Never add formulas and never convert a table into a database or JSON.",
 	"",
 	"THE CONFIG COMMENT",
-	"A Table Fields table is a normal Markdown pipe table with a config comment immediately above it",
-	"(blank lines between them are allowed):",
+	"A Table Fields table is a normal Markdown pipe table with a config comment above it, separated",
+	"by one empty line (without it Obsidian does not render the table):",
 	"",
 	"    <!-- table-fields id=\"tasks\" v=\"1\"",
 	"    cols:",
@@ -758,6 +759,7 @@ const SKILL_TEXT = [
 	"      - {name: \"Amount\", type: \"currency\", options: [\"USD\"]}",
 	"      - {name: \"Done\",   type: \"checkbox\"}",
 	"    -->",
+	"",
 	"    | Task | Status | Due | Amount | Done |",
 	"    | ---- | ------ | --- | ------ | ---- |",
 	"    | ...  | ...    | ... | ...    | ...  |",
@@ -781,8 +783,8 @@ const SKILL_TEXT = [
 	"RULES",
 	"1. Keep it a valid GFM pipe table: a header row, a --- delimiter row, then data rows. Every row",
 	"   starts and ends with a pipe and has the same number of cells as there are columns.",
-	"2. The config comment must sit directly above its table, and cols order must match the table's",
-	"   column order.",
+	"2. The config comment must sit directly above its table with exactly one empty line between",
+	"   them, and cols order must match the table's column order.",
 	"3. Do not invent formulas or computed cells. Percentages and currency are literal values.",
 	"4. For select cells, only use values listed in that column's options. If a new value is needed,",
 	"   add it to options as well.",
