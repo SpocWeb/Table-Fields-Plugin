@@ -630,11 +630,12 @@ function buildSmartTableDecorations(state) {
 		const sel = state.selection.main;
 		const builder = new RangeSetBuilder();
 		for (const t of tables) {
-			const fromLine = state.doc.line(t.configStartLine + 1);
+			// Replace the table only; the config comment above stays visible and editable.
+			const fromLine = state.doc.line(t.headerLine + 1);
 			const toLine = state.doc.line(t.lastRowLine + 1);
 			const from = fromLine.from;
 			const to = toLine.to;
-			if (sel.to >= from && sel.from <= to) continue; // cursor inside -> show source
+			if (sel.to >= from && sel.from <= to) continue; // cursor inside table -> show source
 
 			const rows = [];
 			const sigParts = [];
@@ -645,7 +646,7 @@ function buildSmartTableDecorations(state) {
 				sigParts.push(cells.map((c) => c.text).join("|"));
 			}
 			const signature =
-				from + ":" + to + ":" + t.config.cols.map((c) => c.type + "/" + (c.options || []).join(".")).join(",") + ":" + sigParts.join("//");
+				from + ":" + to + ":" + t.config.cols.map((c) => c.name + "/" + c.type + "/" + (c.options || []).join(".")).join(",") + ":" + sigParts.join("//");
 			const configRange = {
 				from: state.doc.line(t.configStartLine + 1).from,
 				to: state.doc.line(t.commentEndLine + 1).to,
