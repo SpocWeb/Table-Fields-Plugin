@@ -26,7 +26,7 @@
  */
 
 const { Plugin, Notice, MarkdownView, Menu, PluginSettingTab, MarkdownRenderer, Component, Keymap, editorInfoField, editorLivePreviewField } = require("obsidian");
-const { StateField, RangeSetBuilder } = require("@codemirror/state");
+const { StateField, RangeSetBuilder, Prec } = require("@codemirror/state");
 const { EditorView, Decoration, WidgetType } = require("@codemirror/view");
 
 /* ------------------------------ config parsing ------------------------------ */
@@ -176,7 +176,9 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 
 		// Live Preview (the native CM6-rendered table): a CodeMirror 6 editor extension
 		// that replaces the table's source lines with our own interactive table widget.
-		this.registerEditorExtension(smartTableField);
+		// Highest precedence: Obsidian's own table widget replaces the same lines, and for
+		// replace decorations on the same range the higher-precedence source wins.
+		this.registerEditorExtension(Prec.highest(smartTableField));
 
 		this.addCommand({
 			id: "mark-as-table-fields",
@@ -666,7 +668,11 @@ const smartTableField = StateField.define({
 		return buildSmartTableDecorations(state);
 	},
 	update(deco, tr) {
-		if (!tr.docChanged && !tr.selection) return deco;
+		// Also rebuild when Live Preview is switched on/off (Obsidian does that after the
+		// editor is created), or the table only appears once the cursor moves.
+		const modeChanged =
+			tr.startState.field(editorLivePreviewField, false) !== tr.state.field(editorLivePreviewField, false);
+		if (!tr.docChanged && !tr.selection && !modeChanged && !tr.reconfigured) return deco;
 		return buildSmartTableDecorations(tr.state);
 	},
 	provide(f) {
