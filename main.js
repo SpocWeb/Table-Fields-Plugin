@@ -14,7 +14,7 @@
  *     source (known limitation) — controls simply aren't shown then. That is the honest,
  *     non-surprising fallback the PRD §9 describes, not a bug.
  *
- * Config lives in an HTML comment directly above the table (PRD §10, Strategy A), e.g.:
+ * Config lives in an HTML comment above the table, followed by one empty line (PRD §10, Strategy A), e.g.:
  *   <!-- table-fields id="tasks" v="1"
  *   cols:
  *     - {name: "Task",   type: "text"}
@@ -743,7 +743,7 @@ function buildUsageMd(img) {
 const SKILL_TEXT = [
 	"You are assisting a user who uses the Table Fields plugin for Obsidian. Table Fields adds typed,",
 	"interactive columns (checkbox, dropdown, date, currency, percentage) to PLAIN Markdown tables,",
-	"using a small HTML config comment placed directly above each table. The table on disk stays a",
+	"using a small HTML config comment placed above each table. The table on disk stays a",
 	"normal GFM pipe table. Help the user read, create, and edit these tables while following the",
 	"syntax and storage rules below. Never add formulas and never convert a table into a database or JSON.",
 	"",
