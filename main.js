@@ -82,9 +82,65 @@ function isChecked(raw) {
 	return /^\[[xX]\]$/.test(raw.trim());
 }
 
+// Index of the next run of exactly n backticks at or after `from`, or -1.
+function findBacktickRun(line, from, n) {
+	let i = from;
+	while (i < line.length) {
+		if (line[i] !== "`") { i++; continue; }
+		let k = 0;
+		while (line[i + k] === "`") k++;
+		if (k === n) return i;
+		i += k;
+	}
+	return -1;
+}
+
+// Indices of the pipes in a table row that separate cells. A pipe is cell content,
+// not a separator, when escaped (\|), inside a [[wikilink|alias]], or inside `code`
+// - the same pipes Obsidian keeps inside a cell when it renders the table.
+function findSeparatorPipes(line) {
+	const pipes = [];
+	let i = 0;
+	while (i < line.length) {
+		const ch = line[i];
+		if (ch === "\\") { i += 2; continue; } // escaped char, e.g. \|
+		if (ch === "`") {
+			let n = 1;
+			while (line[i + n] === "`") n++;
+			const close = findBacktickRun(line, i + n, n);
+			i = close < 0 ? i + n : close + n; // unclosed run is literal text
+			continue;
+		}
+		if (ch === "[" && line[i + 1] === "[") {
+			const close = line.indexOf("]]", i + 2);
+			if (close >= 0) { i = close + 2; continue; }
+		}
+		if (ch === "|") pipes.push(i);
+		i++;
+	}
+	return pipes;
+}
+
+// Cell source -> displayed value: \| shows as |.
+function unescapePipes(s) {
+	return s.replace(/\\\|/g, "|");
+}
+
+// Value -> cell source: every pipe written as \| so it cannot split the row.
+function escapePipes(s) {
+	return unescapePipes(s).replace(/\|/g, "\\|");
+}
+
 // Split a Markdown table row into { parts, cellOffset } so cell index -> parts index.
+// parts.join("|") restores the line exactly.
 function splitRow(line) {
-	const parts = line.split("|");
+	const parts = [];
+	let from = 0;
+	for (const p of findSeparatorPipes(line)) {
+		parts.push(line.slice(from, p));
+		from = p + 1;
+	}
+	parts.push(line.slice(from));
 	// leading pipe => parts[0] is empty/whitespace; cells begin at index 1
 	const leading = parts.length > 0 && parts[0].trim() === "";
 	return { parts, cellOffset: leading ? 1 : 0 };
@@ -247,7 +303,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 			const { parts, cellOffset } = splitRow(lineText);
 			const idx = cellOffset + colIndex;
 			if (idx < 0 || idx >= parts.length) return null;
-			parts[idx] = " " + newValue + " ";
+			parts[idx] = " " + escapePipes(newValue) + " ";
 			return parts.join("|");
 		};
 
@@ -387,8 +443,7 @@ function serializeConfig(config) {
 
 // Split a table row into cell segments with absolute doc offsets (between pipes).
 function getCellRanges(lineText, lineFrom) {
-	const pipes = [];
-	for (let i = 0; i < lineText.length; i++) if (lineText[i] === "|") pipes.push(i);
+	const pipes = findSeparatorPipes(lineText);
 	const cells = [];
 	for (let k = 0; k < pipes.length - 1; k++) {
 		const innerFrom = pipes[k] + 1;
@@ -400,12 +455,12 @@ function getCellRanges(lineText, lineFrom) {
 
 // Replace one cell's source range via a CM6 transaction (the write-back, Q2).
 function dispatchCell(view, cell, newValue) {
-	view.dispatch({ changes: { from: cell.from, to: cell.to, insert: " " + newValue + " " } });
+	view.dispatch({ changes: { from: cell.from, to: cell.to, insert: " " + escapePipes(newValue) + " " } });
 }
 
 // Render a single interactive/formatted cell into `td` for the Live Preview widget.
 function renderWidgetCell(td, col, cell, view) {
-	const raw = (cell.text || "").trim();
+	const raw = unescapePipes((cell.text || "").trim());
 	switch (col.type) {
 		case "checkbox": {
 			if (!CHECKBOX_RE.test(raw)) { td.textContent = raw; return; }
