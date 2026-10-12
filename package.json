@@ -5,6 +5,9 @@
 	"keywords": ["obsidian", "obsidian-plugin", "markdown", "table", "spreadsheet"],
 	"author": "fyaic",
 	"license": "MIT",
+	"scripts": {
+		"test": "node --test"
+	},
 	"homepage": "https://github.com/fyaic/Table-Fields-Plugin",
 	"repository": {
 		"type": "git",
