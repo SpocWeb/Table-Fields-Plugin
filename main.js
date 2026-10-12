@@ -25,7 +25,7 @@
  *   -->
  */
 
-const { Plugin, Notice, MarkdownView, Menu, PluginSettingTab, MarkdownRenderer, Component, editorLivePreviewField } = require("obsidian");
+const { Plugin, Notice, MarkdownView, Menu, PluginSettingTab, MarkdownRenderer, Component, Keymap, editorInfoField, editorLivePreviewField } = require("obsidian");
 const { StateField, RangeSetBuilder } = require("@codemirror/state");
 const { EditorView, Decoration, WidgetType } = require("@codemirror/view");
 
@@ -458,8 +458,20 @@ function dispatchCell(view, cell, newValue) {
 	view.dispatch({ changes: { from: cell.from, to: cell.to, insert: " " + escapePipes(newValue) + " " } });
 }
 
+// Render a text cell's Markdown (<br>, links, bold, code, ...) the way a native table
+// cell shows it. Without a render context (no app found) it falls back to plain text.
+function renderCellMarkdown(td, text, md) {
+	if (!md || !text) {
+		td.textContent = text;
+		return;
+	}
+	td.classList.add("tf-cell-md");
+	renderMarkdownInto(md.app, text, td, md.component, md.sourcePath);
+}
+
 // Render a single interactive/formatted cell into `td` for the Live Preview widget.
-function renderWidgetCell(td, col, cell, view) {
+// `md` is { app, sourcePath, component } for Markdown rendering of text cells, or null.
+function renderWidgetCell(td, col, cell, view, md) {
 	const raw = unescapePipes((cell.text || "").trim());
 	switch (col.type) {
 		case "checkbox": {
@@ -503,7 +515,7 @@ function renderWidgetCell(td, col, cell, view) {
 			break;
 		}
 		default:
-			td.textContent = raw;
+			renderCellMarkdown(td, raw, md);
 	}
 }
 
@@ -519,6 +531,26 @@ class SmartTableWidget extends WidgetType {
 	toDOM(view) {
 		const wrap = activeDocument.createElement("div");
 		wrap.className = "tf-lp-wrap";
+
+		// Render context for Markdown text cells; the component owns the rendered
+		// children and is unloaded in destroy().
+		const info = view.state.field(editorInfoField, false);
+		const app = info && info.app;
+		let md = null;
+		if (app) {
+			const component = new Component();
+			component.load();
+			wrap.tfComponent = component;
+			md = { app, sourcePath: info.file ? info.file.path : "", component };
+			// ignoreEvent() keeps the editor from handling clicks, so open internal links here.
+			wrap.addEventListener("click", (evt) => {
+				const a = evt.target.closest && evt.target.closest("a.internal-link");
+				if (!a) return;
+				evt.preventDefault();
+				const target = a.getAttribute("data-href") || a.getAttribute("href");
+				if (target) app.workspace.openLinkText(target, md.sourcePath, Keymap.isModEvent(evt));
+			});
+		}
 		const table = activeDocument.createElement("table");
 		table.className = "tf-table tf-lp-table";
 
@@ -544,8 +576,8 @@ class SmartTableWidget extends WidgetType {
 			row.cells.forEach((cell, colIndex) => {
 				const col = this.data.config.cols[colIndex];
 				const td = activeDocument.createElement("td");
-				if (col) renderWidgetCell(td, col, cell, view);
-				else td.textContent = (cell.text || "").trim();
+				if (col) renderWidgetCell(td, col, cell, view, md);
+				else renderCellMarkdown(td, unescapePipes((cell.text || "").trim()), md);
 				tr.appendChild(td);
 			});
 			tbody.appendChild(tr);
@@ -553,6 +585,9 @@ class SmartTableWidget extends WidgetType {
 		table.appendChild(tbody);
 		wrap.appendChild(table);
 		return wrap;
+	}
+	destroy(dom) {
+		if (dom.tfComponent) dom.tfComponent.unload();
 	}
 	// Right-click a header -> pick the column's type (rewrites the config comment).
 	showColumnMenu(view, colIndex, col, evt) {
@@ -776,12 +811,12 @@ const SKILL_TEXT = [
 	"as High to every data row.",
 ].join("\n");
 
-async function renderMarkdownInto(app, md, el, component) {
+async function renderMarkdownInto(app, md, el, component, sourcePath = "") {
 	try {
 		if (MarkdownRenderer && typeof MarkdownRenderer.render === "function") {
-			await MarkdownRenderer.render(app, md, el, "", component);
+			await MarkdownRenderer.render(app, md, el, sourcePath, component);
 		} else if (MarkdownRenderer && typeof MarkdownRenderer.renderMarkdown === "function") {
-			await MarkdownRenderer.renderMarkdown(md, el, "", component);
+			await MarkdownRenderer.renderMarkdown(md, el, sourcePath, component);
 		} else {
 			el.setText(md);
 		}
