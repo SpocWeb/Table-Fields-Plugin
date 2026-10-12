@@ -3,24 +3,12 @@
 /*
  * Tests for table-row cell splitting: a pipe is cell content, not a column separator,
  * when escaped (\|), inside a [[wikilink|alias]], or inside `inline code`.
- * main.js is loaded in a vm context with obsidian/@codemirror stubbed, so its
- * module-level helper functions can be called directly. Run: npm test
+ * Run: npm test
  */
 
 const { test } = require("node:test");
 const assert = require("node:assert");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
-
-function loadPlugin() {
-	const src = fs.readFileSync(path.join(__dirname, "..", "main.js"), "utf8");
-	const stub = new Proxy({}, { get: () => class { static define() { return {}; } } });
-	const ctx = { require: () => stub, module: { exports: {} }, console };
-	vm.createContext(ctx);
-	vm.runInContext(src, ctx);
-	return ctx;
-}
+const { loadPlugin } = require("./load-plugin");
 
 const { splitRow, getCellRanges, escapePipes, unescapePipes } = loadPlugin();
 
