@@ -2,7 +2,7 @@
 
 /*
  * Tests the table-internal config format: a type row after the header's delimiter,
- * option rows (one option per row and column), then a second delimiter before the data.
+ * option rows (one option per row and column), then a row of === before the data.
  * Covers parsing, precedence over a config comment, fenced code blocks, the Live Preview
  * widget data, and Reading view hiding the config rows. Run: npm test
  */
@@ -27,7 +27,7 @@ const TABLE = [
 	"|      | Todo   |      | EUR      |          |", // 3
 	"|      | Doing  |      |          |          |", // 4
 	"|      | a\\|b  |      |          |          |", // 5
-	"| ---- | ------ | ---- | -------- | -------- |", // 6
+	"| ===  | ===    | ===  | ===      | ===      |", // 6
 	"| PRD  | Doing  | 2026-10-13 | 12 | [x]      |", // 7
 	"| Ship | Todo   | 2026-10-20 | 30 | [ ]      |", // 8
 ];
@@ -72,7 +72,14 @@ test("an ordinary first data row is not mistaken for a type row", () => {
 	assert.strictEqual(parseTypeRows(lines, 0, 3), null);
 });
 
-test("a type row without a second delimiter is not a type section", () => {
+test("an older second --- row still closes the type section", () => {
+	const lines = ["| A | B |", "| - | - |", "| text | box |", "|  | x |", "| - | - |", "| a | [ ] |"];
+	const parsed = parseTypeRows(lines, 0, 5);
+	assert.strictEqual(parsed.endLine, 4);
+	assert.deepStrictEqual(Array.from(parsed.config.cols[1].options), ["x"]);
+});
+
+test("a type row without a closing row is not a type section", () => {
 	const lines = ["| A | B |", "| - | - |", "| text | date |", "| x | 2026-10-13 |"];
 	assert.strictEqual(parseTypeRows(lines, 0, 3), null);
 });
@@ -169,7 +176,7 @@ test("editing an option row changes the widget signature", () => {
 });
 
 // Reading view: fake rendered <table> whose tbody has one <tr> per source line after the
-// delimiter (Obsidian renders type, option and second delimiter rows as ordinary rows).
+// delimiter (Obsidian renders type, option and === rows as ordinary rows).
 function fakeRenderedTable(bodyLineCount) {
 	const rows = [];
 	for (let i = 0; i < bodyLineCount; i++) {

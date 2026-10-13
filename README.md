@@ -26,7 +26,7 @@ file, no lock-in.
 ## A type row gives each column its field type
 
 Below the header's `---` line you write a row with each column's type, one row per dropdown
-option, and a second `---` line. The data rows follow:
+option, and a row of `===`. The data rows follow:
 
 ```markdown
 | Task           | Status | Due        | Done |
@@ -35,7 +35,7 @@ option, and a second `---` line. The data rows follow:
 |                | Todo   |            |      |
 |                | Doing  |            |      |
 |                | Done   |            |      |
-| -------------- | ------ | ---------- | ---- |
+| ===            | ===    | ===        | ===  |
 | Draft PRD      | Doing  | 2026-07-22 | [x]  |
 | Review designs | Todo   | 2026-07-24 | [ ]  |
 ```

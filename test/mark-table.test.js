@@ -2,7 +2,7 @@
 
 /*
  * Tests the "Mark table under cursor as Table Fields" command: it inserts a type row
- * (inferred from the first data row) and a second delimiter row below the header's
+ * (inferred from the first data row) and a row of === below the header's
  * delimiter, and leaves tables alone that already have types (type rows or a comment).
  * The editor is a minimal fake over a string. Run: npm test
  */
@@ -34,7 +34,7 @@ function fakeEditor(text, cursorLine) {
 
 const TABLE = ["| Task | Done | Due        |", "| ---- | ---- | ---------- |", "| a    | [x]  | 2026-10-13 |"].join("\n");
 
-test("inserts a type row and a second delimiter below the header's delimiter", () => {
+test("inserts a type row and a === row below the header's delimiter", () => {
 	const editor = fakeEditor("Intro\n\n" + TABLE + "\n\nOutro", 4);
 	markTableAsSmart.call({}, editor);
 	assert.strictEqual(
@@ -45,7 +45,7 @@ test("inserts a type row and a second delimiter below the header's delimiter", (
 			"| Task | Done | Due        |",
 			"| ---- | ---- | ---------- |",
 			"| text | box | date |",
-			"| ---- | ---- | ---------- |",
+			"| === | === | === |",
 			"| a    | [x]  | 2026-10-13 |",
 			"",
 			"Outro",
@@ -65,7 +65,7 @@ test("the marked table parses back with the inferred types", () => {
 test("a table without data rows still gets a type section", () => {
 	const editor = fakeEditor("| A | B |\n| - | - |", 0);
 	markTableAsSmart.call({}, editor);
-	assert.strictEqual(editor.text(), "| A | B |\n| - | - |\n| text | text |\n| - | - |");
+	assert.strictEqual(editor.text(), "| A | B |\n| - | - |\n| text | text |\n| === | === |");
 });
 
 test("a table that already has type rows is left alone", () => {

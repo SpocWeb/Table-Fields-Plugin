@@ -15,14 +15,14 @@
  *     non-surprising fallback the PRD §9 describes, not a bug.
  *
  * Config lives inside the table: a type row after the delimiter, option rows (one option
- * per row and column), then a second delimiter before the data rows (see parseTypeRows):
+ * per row and column), then a row of === before the data rows (see parseTypeRows):
  *   | Task | Status | Due  | Amount   | Done     |
  *   | ---- | ------ | ---- | -------- | -------- |
  *   | text | select | date | currency | box      |
  *   |      | Todo   |      | USD      |          |
  *   |      | Doing  |      |          |          |
  *   |      | Done   |      |          |          |
- *   | ---- | ------ | ---- | -------- | -------- |
+ *   | ===  | ===    | ===  | ===      | ===      |
  *   | PRD  | Doing  | 2026-07-22 | 1200 | [x]   |
  *
  * The older format, an HTML comment above the table followed by one empty line, is still read:
@@ -97,14 +97,22 @@ function isDelimiterRow(line) {
 	return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
 }
 
-// Config encoded inside the table itself, between the delimiter and a second one:
+// The row closing a type section: every cell ===. A second --- delimiter row is still
+// accepted, but Obsidian's table editor deletes such a row when the cursor enters the table.
+function isSectionEndRow(line) {
+	if (!line) return false;
+	const cells = splitRowCells(line);
+	return cells.length > 0 && (cells.every((c) => /^=+$/.test(c)) || isDelimiterRow(line));
+}
+
+// Config encoded inside the table itself, between the delimiter and a row of ===:
 //   | Task | Status | Due  |    <- header
 //   | ---- | ------ | ---- |    <- delimiter
 //   | text | select | date |    <- type row (an empty cell means text, box = checkbox)
 //   |      | Todo   |      |    <- option rows: one option per row and column
 //   |      | Done   |      |
-//   | ---- | ------ | ---- |    <- second delimiter; data rows follow
-// Returns { config, typeLine, endLine } (0-based, endLine = second delimiter) or null.
+//   | ===  | ===    | ===  |    <- end of the type section; data rows follow
+// Returns { config, typeLine, endLine } (0-based, endLine = the === row) or null.
 function parseTypeRows(lines, headerLine, lastRowLine) {
 	const typeLine = headerLine + 2;
 	if (typeLine > lastRowLine || !isDelimiterRow(lines[headerLine + 1])) return null;
@@ -112,7 +120,7 @@ function parseTypeRows(lines, headerLine, lastRowLine) {
 	if (!types.some((t) => t !== "")) return null;
 	if (!types.every((t) => t === "" || FIELD_TYPES.includes(t))) return null;
 	let endLine = typeLine + 1;
-	while (endLine <= lastRowLine && !isDelimiterRow(lines[endLine])) endLine++;
+	while (endLine <= lastRowLine && !isSectionEndRow(lines[endLine])) endLine++;
 	if (endLine > lastRowLine) return null;
 	const cols = splitRowCells(lines[headerLine]).map((name, i) => ({
 		name: unescapePipes(name),
@@ -291,7 +299,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 				);
 				if (!resolved) continue; // plain table -> untouched
 				const config = resolved.config;
-				// Type row, option rows and second delimiter render as body rows: hide them,
+				// Type row, option rows and the === row render as body rows: hide them,
 				// but keep counting them so rowIndex still maps to lineStart + 2 + rowIndex.
 				const configRows = resolved.dataStartLine - (info.lineStart + 2);
 
@@ -441,17 +449,18 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 			return;
 		}
 
-		// Type row inferred from the first data row, then a second delimiter: the
+		// Type row inferred from the first data row, then a row of ===: the
 		// table-internal config format (see parseTypeRows).
 		const headerCells = splitRowCells(lines[top]);
 		const sampleCells = top + 2 <= bottom ? splitRowCells(lines[top + 2]) : [];
 		const types = headerCells.map((_, i) => inferType((sampleCells[i] || "").trim()));
 		const typeRow = "| " + types.join(" | ") + " |";
+		const endRow = "| " + headerCells.map(() => "===").join(" | ") + " |";
 
-		editor.replaceRange("\n" + typeRow + "\n" + delimiter, { line: top + 1, ch: delimiter.length });
+		editor.replaceRange("\n" + typeRow + "\n" + endRow, { line: top + 1, ch: delimiter.length });
 		new Notice(
 			`Table Fields: marked table (${headerCells.length} columns). Edit the type row; ` +
-			`put options in rows above the second --- line.`
+			`put options in rows above the === row.`
 		);
 	}
 };
@@ -795,7 +804,7 @@ function buildUsageMd(img) {
 	"## Set up a table",
 	"",
 	"Below the header's --- line, add a row with each column's type, then one row per dropdown",
-	"option (or currency code), then a second --- line. Your data rows follow:",
+	"option (or currency code), then a row of ===. Your data rows follow:",
 	"",
 	"    | Task      | Status | Due        | Done |",
 	"    | --------- | ------ | ---------- | ---- |",
@@ -803,7 +812,7 @@ function buildUsageMd(img) {
 	"    |           | Todo   |            |      |",
 	"    |           | Doing  |            |      |",
 	"    |           | Done   |            |      |",
-	"    | --------- | ------ | ---------- | ---- |",
+	"    | ===       | ===    | ===        | ===  |",
 	"    | Draft PRD | Doing  | 2026-07-22 | [x]  |",
 	"",
 	"An empty type cell means text. The plugin hides the type and option rows when it shows the table.",
@@ -846,7 +855,7 @@ const SKILL_TEXT = [
 	"below. Never add formulas and never convert a table into a database or JSON.",
 	"",
 	"THE TYPE SECTION",
-	"Between the header's --- delimiter row and a second --- delimiter row, a Table Fields table has:",
+	"Between the header's --- delimiter row and a row of === cells, a Table Fields table has:",
 	"",
 	"    | Task | Status | Due  | Amount   | Done |",
 	"    | ---- | ------ | ---- | -------- | ---- |",
@@ -854,15 +863,15 @@ const SKILL_TEXT = [
 	"    |      | Todo   |      | USD      |      |",
 	"    |      | Doing  |      |          |      |",
 	"    |      | Done   |      |          |      |",
-	"    | ---- | ------ | ---- | -------- | ---- |",
+	"    | ===  | ===    | ===  | ===      | ===  |",
 	"    | ...  | ...    | ...  | ...      | ...  |",
 	"",
 	"- Type row (first row after the header's ---): one type per column, one of: text, box,",
 	"  select, date, currency, percentage. An empty cell means text; checkbox is an alias of box.",
-	"- Option rows (zero or more, before the second ---): one option per row and column. For select,",
+	"- Option rows (zero or more, before the === row): one option per row and column. For select,",
 	"  the allowed values; for currency, a single ISO currency code such as USD. Leave cells empty",
 	"  where a column has fewer options. Write a | inside an option as \\|.",
-	"- Data rows follow the second ---.",
+	"- The === row ends the type section (never a second --- row: Obsidian deletes it); data rows follow.",
 	"Older tables may instead have an HTML comment above the table (<!-- table-fields ... cols: ... -->)",
 	"listing {name, type, options} per column in column order; read it the same way.",
 	"",
@@ -878,8 +887,8 @@ const SKILL_TEXT = [
 	"RULES",
 	"1. Keep it a valid GFM pipe table: a header row, a --- delimiter row, the type section, then data",
 	"   rows. Every row starts and ends with a pipe and has the same number of cells as there are columns.",
-	"2. Keep the type row directly after the first --- row and end the option rows with a second ---",
-	"   row; never put data rows inside the type section.",
+	"2. Keep the type row directly after the --- row and end the option rows with a row of ===;",
+	"   never put data rows inside the type section.",
 	"3. Do not invent formulas or computed cells. Percentages and currency are literal values.",
 	"4. For select cells, only use values listed in that column's option rows. If a new value is",
 	"   needed, add it as an option too (add an option row if the column has no free cell left).",
@@ -894,19 +903,19 @@ const SKILL_TEXT = [
 	"select value is one of the allowed options. Use these meanings to summarize, filter, or answer.",
 	"",
 	"CREATING OR EDITING A TABLE",
-	"- Create: write the header row, ---, the type row, any option rows, a second ---, then the data",
+	"- Create: write the header row, ---, the type row, any option rows, a row of ===, then the data",
 	"  rows, using the storage forms above.",
 	"- Edit a value: change only the target cell, keeping its canonical form.",
-	"- Add a column: add a cell to every row - header, both --- rows, type row, option rows and data rows.",
-	"- Add a data row: add one pipe row after the second --- with a value per column in canonical form.",
+	"- Add a column: add a cell to every row - header, --- row, type row, option rows, === row and data rows.",
+	"- Add a data row: add one pipe row after the === row with a value per column in canonical form.",
 	"- Change a column's type: update its cell in the type row (and its options if needed), and make",
 	"  sure existing cell values match the new type's storage form.",
 	"",
 	"EXAMPLE",
 	"User: \"Mark 'Draft PRD' as done and add a Priority column with Low/Medium/High.\"",
 	"You: set that row's Done cell to [x]; add a Priority column whose type cell is select and whose",
-	"option cells are Low, Medium and High (adding option rows if needed), with --- in both delimiter",
-	"rows and a value such as High in every data row.",
+	"option cells are Low, Medium and High (adding option rows if needed), with --- in the delimiter",
+	"row, === in the === row and a value such as High in every data row.",
 ].join("\n");
 
 async function renderMarkdownInto(app, md, el, component, sourcePath = "") {

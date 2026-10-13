@@ -14,7 +14,7 @@ below. Never add formulas and never convert a table into a database or JSON.
 
 ### The type section
 
-Between the header's `---` delimiter row and a second `---` delimiter row, a Table Fields table has:
+Between the header's `---` delimiter row and a row of `===` cells, a Table Fields table has:
 
 ```markdown
 | Task | Status | Due  | Amount   | Done |
@@ -23,17 +23,18 @@ Between the header's `---` delimiter row and a second `---` delimiter row, a Tab
 |      | Todo   |      | USD      |      |
 |      | Doing  |      |          |      |
 |      | Done   |      |          |      |
-| ---- | ------ | ---- | -------- | ---- |
+| ===  | ===    | ===  | ===      | ===  |
 | ...  | ...    | ...  | ...      | ...  |
 ```
 
 - **Type row** (first row after the header's `---`): one type per column, one of `text`,
   `box`, `select`, `date`, `currency`, `percentage`. An empty cell means `text`; `checkbox` is an
   alias of `box`.
-- **Option rows** (zero or more, before the second `---`): one option per row and column. For
+- **Option rows** (zero or more, before the `===` row): one option per row and column. For
   `select`, the allowed values; for `currency`, a single ISO currency code such as `USD`. Leave
   cells empty where a column has fewer options. Write a `|` inside an option as `\|`.
-- **Data rows** follow the second `---`.
+- **The `===` row** ends the type section; data rows follow. Never use a second `---` row
+  instead: Obsidian's table editor deletes it.
 
 Older tables may instead have an HTML comment above the table
 (`<!-- table-fields ... cols: ... -->`) listing `{name, type, options}` per column in column order;
@@ -56,8 +57,8 @@ Values are stored in this plain, canonical form; the plugin only formats them on
 
 1. Keep it a valid GFM pipe table: header row, a `---` delimiter row, the type section, then data
    rows. Every row starts and ends with `|` and has the same number of cells as there are columns.
-2. Keep the type row directly after the first `---` row and end the option rows with a second
-   `---` row; never put data rows inside the type section.
+2. Keep the type row directly after the `---` row and end the option rows with a row of `===`;
+   never put data rows inside the type section.
 3. No formulas or computed cells. Percentages and currency are literal values the user maintains.
 4. For `select` cells, only use values listed in that column's option rows; if a new value is
    needed, add it as an option too (add an option row if the column has no free cell left).
@@ -74,13 +75,13 @@ done/true, a currency number is money in that column's currency, `60%` means six
 
 ### Creating or editing a table
 
-- **Create**: write the header row, `---`, the type row, any option rows, a second `---`, then the
+- **Create**: write the header row, `---`, the type row, any option rows, a row of `===`, then the
   data rows, using the storage forms above.
 - **Edit a value**: change only the target cell, keeping its canonical form.
-- **Add a column**: add a cell to every row - header, both `---` rows, type row, option rows and
-  data rows.
-- **Add a data row**: add one pipe row after the second `---` with a value per column in
-  canonical form.
+- **Add a column**: add a cell to every row - header, `---` row, type row, option rows, `===` row
+  and data rows.
+- **Add a data row**: add one pipe row after the `===` row with a value per column in canonical
+  form.
 - **Change a column's type**: update its cell in the type row (and its options if needed), and
   make sure existing cell values match the new type's storage form.
 
@@ -89,5 +90,5 @@ done/true, a currency number is money in that column's currency, `60%` means six
 > "Mark 'Draft PRD' as done and add a Priority column with Low/Medium/High."
 
 Set that row's Done cell to `[x]`; add a `Priority` column whose type cell is `select` and whose
-option cells are `Low`, `Medium` and `High` (adding option rows if needed), with `---` in both
-delimiter rows and a value such as `High` in every data row.
+option cells are `Low`, `Medium` and `High` (adding option rows if needed), with `---` in the
+delimiter row, `===` in the `===` row and a value such as `High` in every data row.
