@@ -205,24 +205,24 @@ test("Reading view hides the config rows and keeps row indexes on source lines",
 	assert.strictEqual(doc.split("\n")[2 + 2 + 5].includes("PRD"), true);
 });
 
-// The marked format after sorting by a column: config rows scattered among the data rows.
+// The __ format after sorting by a column: config rows scattered among the data rows.
 const SORTED = [
-	"| Task | Status | Done |", // 0
-	"| ---- | ------ | ---- |", // 1
-	"| PRD  | Doing  | [x]  |", // 2
-	"| ===  | ===    | ===  |", // 3 end row, moved by the sort
-	"| !    | !Done  | !    |", // 4 option row
-	"| Ship | Todo   | [ ]  |", // 5
-	"| !    | !Todo  | !    |", // 6 option row
-	"| !text | !select | !box |", // 7 type row, sorted below its options
-	"| Note | !wow   | [ ]  |", // 8 data: not every cell starts with !
+	"| Task   | Status   | Done  |", // 0
+	"| ----   | ------   | ----  |", // 1
+	"| PRD    | Doing    | [x]   |", // 2
+	"|        | __Done   |       |", // 3 option row
+	"| Ship   | Todo     | [ ]   |", // 4
+	"|        | __Todo   |       |", // 5 option row
+	"| __text | __select | __box |", // 6 type row, sorted below its options
+	"| Note   | __wow    | [ ]   |", // 7 data: a non-empty cell without __
+	"|        |          |       |", // 8 data: no __ cell at all
 ];
 
-test("marked config rows are found anywhere in the table, the end row without a mark", () => {
+test("config rows (only __ or empty cells) are found anywhere in the table", () => {
 	const parsed = parseTypeRows(SORTED, 0, SORTED.length - 1);
 	assert.strictEqual(parsed.marked, true);
-	assert.strictEqual(parsed.typeLine, 7);
-	assert.deepStrictEqual(Array.from(parsed.configLines), [3, 4, 6, 7]);
+	assert.strictEqual(parsed.typeLine, 6);
+	assert.deepStrictEqual(Array.from(parsed.configLines), [3, 5, 6]);
 	assert.deepStrictEqual(plain(parsed.config.cols), [
 		{ name: "Task", type: "text", options: [] },
 		{ name: "Status", type: "select", options: ["Done", "Todo"] },
@@ -230,16 +230,21 @@ test("marked config rows are found anywhere in the table, the end row without a 
 	]);
 });
 
-test("Live Preview shows the data rows of a sorted marked table and writes types with the mark", () => {
+test("an empty type cell means text in the __ format", () => {
+	const lines = ["| A | B |", "| - | - |", "|  | __box |", "| x | [ ] |"];
+	assert.deepStrictEqual(Array.from(parseTypeRows(lines, 0, 3).config.cols, (c) => c.type), ["text", "checkbox"]);
+});
+
+test("Live Preview shows the data rows of a sorted table and writes types with the __ prefix", () => {
 	const doc = [...SORTED, "", "after"].join("\n");
 	const [deco] = buildSmartTableDecorations(fakeState(doc));
 	const data = deco.deco.widget.data;
-	assert.deepStrictEqual(Array.from(data.rows, (r) => r.cells[0].text.trim()), ["PRD", "Ship", "Note"]);
-	assert.strictEqual(data.typeMark, "!");
-	assert.strictEqual(doc.slice(data.typeCells[2].from, data.typeCells[2].to).trim(), "!box");
+	assert.deepStrictEqual(Array.from(data.rows, (r) => r.cells[0].text.trim()), ["PRD", "Ship", "Note", ""]);
+	assert.strictEqual(data.typeMark, "__");
+	assert.strictEqual(doc.slice(data.typeCells[2].from, data.typeCells[2].to).trim(), "__box");
 });
 
-test("Reading view hides scattered marked config rows only", () => {
+test("Reading view hides scattered config rows only", () => {
 	const doc = SORTED.join("\n");
 	const { table, rows } = fakeRenderedTable(SORTED.length - 2);
 	const enhanced = [];
@@ -248,8 +253,8 @@ test("Reading view hides scattered marked config rows only", () => {
 		{ findAll: () => [table] },
 		{ getSectionInfo: () => ({ text: doc, lineStart: 0 }) }
 	);
-	assert.deepStrictEqual(rows.map((r) => r.classes.has("tf-config-row")), [false, true, true, false, true, true, false]);
-	assert.deepStrictEqual([...new Set(enhanced)], [0, 3, 6]);
+	assert.deepStrictEqual(rows.map((r) => r.classes.has("tf-config-row")), [false, true, false, true, true, false, false]);
+	assert.deepStrictEqual([...new Set(enhanced)], [0, 2, 5, 6]);
 });
 
 test("Reading view leaves a comment-format table's rows visible", () => {

@@ -14,16 +14,15 @@
  *     source (known limitation) — controls simply aren't shown then. That is the honest,
  *     non-surprising fallback the PRD §9 describes, not a bug.
  *
- * Config lives inside the table, in rows whose cells all start with "!" (see parseMarkedRows):
- * a type row and option rows (one option per row and column), then an unmarked end row of ===.
- * The mark keeps them together at the top or bottom when the table is sorted by a column:
- *   | Task  | Status  | Due   | Amount    | Done |
- *   | ----  | ------  | ----  | --------  | ---- |
- *   | !text | !select | !date | !currency | !box |
- *   | !     | !Todo   | !     | !USD      | !    |
- *   | !     | !Doing  | !     | !         | !    |
- *   | ===   | ===     | ===   | ===       | ===  |
- *   | PRD   | Doing   | 2026-07-22 | 1200 | [x]  |
+ * Config lives inside the table, in rows whose cells are all "__"-prefixed or empty (see
+ * parseMarkedRows): a type row and option rows (one option per row and column). They are found
+ * by their cells wherever a sort by column moves them:
+ *   | Task   | Status   | Due    | Amount     | Done  |
+ *   | ----   | ------   | ----   | --------   | ----  |
+ *   | __text | __select | __date | __currency | __box |
+ *   |        | __Todo   |        | __USD      |       |
+ *   |        | __Doing  |        |            |       |
+ *   | PRD    | Doing    | 2026-07-22 | 1200   | [x]   |
  *
  * The older format, an HTML comment above the table followed by one empty line, is still read:
  *   <!-- table-fields id="tasks" v="1"
@@ -105,19 +104,19 @@ function isSectionEndRow(line) {
 	return cells.length > 0 && (cells.every((c) => /^=+$/.test(c)) || isDelimiterRow(line));
 }
 
-// Every cell of a config row starts with this mark, so sorting the table by a column keeps
-// the config rows together at the top or bottom; an empty config cell is the mark alone.
-const CONFIG_MARK = "!";
+// Prefix of every type and option cell; a config row has only such cells and empty ones.
+const CONFIG_MARK = "__";
 
-// Whether every cell of a table row starts with CONFIG_MARK.
+// Whether a table row is a config row: every cell empty or starting with CONFIG_MARK, and
+// at least one starting with it.
 function isMarkedRow(line) {
 	const cells = splitRowCells(line || "");
-	return cells.length > 0 && cells.every((c) => c.startsWith(CONFIG_MARK));
+	return cells.some((c) => c.startsWith(CONFIG_MARK)) && cells.every((c) => c === "" || c.startsWith(CONFIG_MARK));
 }
 
-// The cells of a marked row without the mark.
+// The cells of a config row without the mark (empty cells stay empty).
 function unmarkedCells(line) {
-	return splitRowCells(line).map((c) => c.slice(CONFIG_MARK.length).trim());
+	return splitRowCells(line).map((c) => (c.startsWith(CONFIG_MARK) ? c.slice(CONFIG_MARK.length).trim() : c));
 }
 
 // Whether cells are column types: each a known type or empty, at least one not empty.
@@ -140,34 +139,24 @@ function configOf(headerCells, typeCells, optionRows) {
 	return { id: null, version: "1", cols };
 }
 
-// Whether every cell of a table row is a run of =: the end row of the config rows.
-function isEndRow(line) {
-	const cells = splitRowCells(line || "");
-	return cells.length > 0 && cells.every((c) => /^=+$/.test(c));
-}
-
-// Config encoded inside the table itself in rows whose cells all start with "!":
-//   | Task  | Status  | Due   |    <- header
-//   | ----  | ------  | ----  |    <- delimiter
-//   | !text | !select | !date |    <- type row (! alone means text, box = checkbox)
-//   | !     | !Todo   | !     |    <- option rows: one option per row and column
-//   | !     | !Done   | !     |
-//   | ===   | ===     | ===   |    <- end row (not marked), carries nothing
-//   | PRD   | Doing   | ...   |    <- data rows
+// Config encoded inside the table itself in rows of only "__"-prefixed and empty cells:
+//   | Task   | Status   | Due    |    <- header
+//   | ----   | ------   | ----   |    <- delimiter
+//   | __text | __select | __date |    <- type row (empty means text, box = checkbox)
+//   |        | __Todo   |        |    <- option rows: one option per row and column
+//   |        | __Done   |        |
+//   | PRD    | Doing    | ...    |    <- data rows
 // The rows may stand anywhere in the table (sorting by a column moves them), so they are
-// found by the mark (the end row by its ===), not by position: the type row is the
-// marked row of type names. Returns { config, typeLine, configLines, marked: true }
-// (0-based lines) or null.
+// found by their cells, not by position: the type row is the config row of type names.
+// Returns { config, typeLine, configLines, marked: true } (0-based lines) or null.
 function parseMarkedRows(lines, headerLine, lastRowLine) {
-	const markedLines = [];
 	const configLines = [];
 	for (let ln = headerLine + 2; ln <= lastRowLine; ln++) {
-		if (isMarkedRow(lines[ln])) markedLines.push(ln);
-		if (isMarkedRow(lines[ln]) || isEndRow(lines[ln])) configLines.push(ln);
+		if (isMarkedRow(lines[ln])) configLines.push(ln);
 	}
-	const typeLine = markedLines.find((ln) => isTypeCells(unmarkedCells(lines[ln])));
+	const typeLine = configLines.find((ln) => isTypeCells(unmarkedCells(lines[ln])));
 	if (typeLine === undefined) return null;
-	const optionRows = markedLines.filter((ln) => ln !== typeLine).map((ln) => unmarkedCells(lines[ln]));
+	const optionRows = configLines.filter((ln) => ln !== typeLine).map((ln) => unmarkedCells(lines[ln]));
 	const config = configOf(splitRowCells(lines[headerLine]), unmarkedCells(lines[typeLine]), optionRows);
 	return { config, typeLine, configLines, marked: true };
 }
@@ -512,18 +501,17 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 			return;
 		}
 
-		// Type row inferred from the first data row and marked with "!", then the === end row:
-		// the table-internal config format (see parseMarkedRows).
+		// Type row inferred from the first data row, every cell prefixed with "__": the
+		// table-internal config format (see parseMarkedRows).
 		const headerCells = splitRowCells(lines[top]);
 		const sampleCells = top + 2 <= bottom ? splitRowCells(lines[top + 2]) : [];
 		const types = headerCells.map((_, i) => inferType((sampleCells[i] || "").trim()));
 		const typeRow = "| " + types.map((t) => CONFIG_MARK + t).join(" | ") + " |";
-		const endRow = "| " + headerCells.map(() => "===").join(" | ") + " |";
 
-		editor.replaceRange("\n" + typeRow + "\n" + endRow, { line: top + 1, ch: delimiter.length });
+		editor.replaceRange("\n" + typeRow, { line: top + 1, ch: delimiter.length });
 		new Notice(
 			`Table Fields: marked table (${headerCells.length} columns). Edit the type row; ` +
-			`add options in rows whose cells start with !, like | ! | !Todo |.`
+			`add options in rows of __-prefixed or empty cells, like |  | __Todo |.`
 		);
 	}
 };
@@ -870,20 +858,18 @@ function buildUsageMd(img) {
 	"## Set up a table",
 	"",
 	"Below the header's --- line, add a row with each column's type, then one row per dropdown",
-	"option (or currency code), then a row of ===. Start every cell of the type and option rows",
-	"with !, so they stay together at the top or bottom when you sort the table by a column:",
+	"option (or currency code). Start their cells with __ and leave the others empty:",
 	"",
-	"    | Task      | Status  | Due        | Done |",
-	"    | --------- | ------- | ---------- | ---- |",
-	"    | !text     | !select | !date      | !box |",
-	"    | !         | !Todo   | !          | !    |",
-	"    | !         | !Doing  | !          | !    |",
-	"    | !         | !Done   | !          | !    |",
-	"    | ===       | ===     | ===        | ===  |",
-	"    | Draft PRD | Doing   | 2026-07-22 | [x]  |",
+	"    | Task      | Status   | Due        | Done  |",
+	"    | --------- | -------- | ---------- | ----- |",
+	"    | __text    | __select | __date     | __box |",
+	"    |           | __Todo   |            |       |",
+	"    |           | __Doing  |            |       |",
+	"    |           | __Done   |            |       |",
+	"    | Draft PRD | Doing    | 2026-07-22 | [x]   |",
 	"",
-	"A ! alone means text in the type row and no option in an option row. The plugin hides these",
-	"rows when it shows the table.",
+	"An empty type cell means text. The plugin hides these rows when it shows the table, and finds",
+	"them wherever sorting the table by a column moves them.",
 	"",
 	"Or: put your cursor in any normal table and run the command **Table Fields: Mark table under",
 	"cursor as Table Fields** — it adds the type row from your data. Then right-click a header to",
@@ -923,28 +909,26 @@ const SKILL_TEXT = [
 	"below. Never add formulas and never convert a table into a database or JSON.",
 	"",
 	"THE CONFIG ROWS",
-	"Config rows are the type and option rows, whose cells ALL start with !, and an end row of ===.",
+	"Config rows are rows whose cells are each either empty or start with __ (at least one does).",
 	"They usually follow the header's --- row, but sorting the table may move them anywhere:",
 	"",
-	"    | Task  | Status  | Due   | Amount    | Done |",
-	"    | ----  | ------  | ----  | --------  | ---- |",
-	"    | !text | !select | !date | !currency | !box |",
-	"    | !     | !Todo   | !     | !USD      | !    |",
-	"    | !     | !Doing  | !     | !         | !    |",
-	"    | !     | !Done   | !     | !         | !    |",
-	"    | ===   | ===     | ===   | ===       | ===  |",
-	"    | ...   | ...     | ...   | ...       | ...  |",
+	"    | Task   | Status   | Due    | Amount     | Done  |",
+	"    | ----   | ------   | ----   | --------   | ----  |",
+	"    | __text | __select | __date | __currency | __box |",
+	"    |        | __Todo   |        | __USD      |       |",
+	"    |        | __Doing  |        |            |       |",
+	"    |        | __Done   |        |            |       |",
+	"    | ...    | ...      | ...    | ...        | ...   |",
 	"",
 	"- Type row: the config row of type names, one per column: text, box, select, date, currency,",
-	"  percentage. A ! alone means text; checkbox is an alias of box.",
+	"  percentage. An empty cell means text; checkbox is an alias of box.",
 	"- Option rows: the other config rows, one option per row and column. For select, the allowed",
-	"  values; for currency, a single ISO currency code such as USD. A ! alone means no option.",
-	"  Write a | inside an option as \\|.",
-	"- End row: === in every cell, without !; it carries nothing and may also be moved by sorting.",
-	"- All other rows are data rows. Never use a second --- row: Obsidian deletes it.",
-	"Older tables may have the same rows without the ! (right after the ---, ended by === or ---), or",
-	"an HTML comment above the table (<!-- table-fields ... cols: ... -->) listing {name, type,",
-	"options} per column in column order; read them the same way.",
+	"  values; for currency, a single ISO currency code such as USD. Leave a cell empty for no",
+	"  option. Write a | inside an option as \\|.",
+	"- All other rows are data rows. Never add a second --- row: Obsidian deletes it.",
+	"Older tables may have the type and option rows unprefixed right after the --- row, ended by a",
+	"row of === or ---, or an HTML comment above the table (<!-- table-fields ... cols: ... -->)",
+	"listing {name, type, options} per column in column order; read them the same way.",
 	"",
 	"HOW VALUES ARE STORED (use these exact forms when writing cells)",
 	"- text: plain text. Example: Draft PRD",
@@ -958,8 +942,8 @@ const SKILL_TEXT = [
 	"RULES",
 	"1. Keep it a valid GFM pipe table: a header row, a --- delimiter row, the config rows, then data",
 	"   rows. Every row starts and ends with a pipe and has the same number of cells as there are columns.",
-	"2. Start every cell of a type or option row with ! (a ! alone for an empty cell); never start",
-	"   every cell of a data row with !, and never fill a data row with === only.",
+	"2. In type and option rows, start every non-empty cell with __. A data row must have at least",
+	"   one non-empty cell that does not start with __.",
 	"3. Do not invent formulas or computed cells. Percentages and currency are literal values.",
 	"4. For select cells, only use values listed in that column's option rows. If a new value is",
 	"   needed, add it as an option too (add an option row if the column has no free cell left).",
@@ -974,20 +958,19 @@ const SKILL_TEXT = [
 	"select value is one of the allowed options. Use these meanings to summarize, filter, or answer.",
 	"",
 	"CREATING OR EDITING A TABLE",
-	"- Create: write the header row, ---, the !type row, any !option rows, a === row, then the data",
-	"  rows, using the storage forms above.",
+	"- Create: write the header row, ---, the __type row, any __option rows, then the data rows,",
+	"  using the storage forms above.",
 	"- Edit a value: change only the target cell, keeping its canonical form.",
-	"- Add a column: add a cell to every row - header, --- row, type and option rows (with !), === row",
-	"  and data rows.",
+	"- Add a column: add a cell to every row - header, --- row, type and option rows and data rows.",
 	"- Add a data row: add one pipe row after the config rows with a value per column in canonical form.",
-	"- Change a column's type: update its cell in the type row (keeping the !, and its options if",
+	"- Change a column's type: update its cell in the type row (keeping the __, and its options if",
 	"  needed), and make sure existing cell values match the new type's storage form.",
 	"",
 	"EXAMPLE",
 	"User: \"Mark 'Draft PRD' as done and add a Priority column with Low/Medium/High.\"",
-	"You: set that row's Done cell to [x]; add a Priority column whose type cell is !select and whose",
-	"option cells are !Low, !Medium and !High (adding option rows if needed), with --- in the delimiter",
-	"row, === in the end row, ! in other config rows and a value such as High in every data row.",
+	"You: set that row's Done cell to [x]; add a Priority column whose type cell is __select and whose",
+	"option cells are __Low, __Medium and __High (adding option rows if needed), with --- in the",
+	"delimiter row, empty cells in other config rows and a value such as High in every data row.",
 ].join("\n");
 
 async function renderMarkdownInto(app, md, el, component, sourcePath = "") {

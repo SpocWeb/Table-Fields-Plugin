@@ -14,32 +14,29 @@ below. Never add formulas and never convert a table into a database or JSON.
 
 ### The config rows
 
-Config rows are the type and option rows, whose cells **all** start with `!`, and an end row of
-`===`. They usually follow the header's `---` row, but sorting the table may move them anywhere:
+Config rows are rows whose cells are each either empty or start with `__` (at least one does).
+They usually follow the header's `---` row, but sorting the table may move them anywhere:
 
 ```markdown
-| Task  | Status  | Due   | Amount    | Done |
-| ----  | ------  | ----  | --------  | ---- |
-| !text | !select | !date | !currency | !box |
-| !     | !Todo   | !     | !USD      | !    |
-| !     | !Doing  | !     | !         | !    |
-| !     | !Done   | !     | !         | !    |
-| ===   | ===     | ===   | ===       | ===  |
-| ...   | ...     | ...   | ...       | ...  |
+| Task   | Status   | Due    | Amount     | Done  |
+| ----   | ------   | ----   | --------   | ----  |
+| __text | __select | __date | __currency | __box |
+|        | __Todo   |        | __USD      |       |
+|        | __Doing  |        |            |       |
+|        | __Done   |        |            |       |
+| ...    | ...      | ...    | ...        | ...   |
 ```
 
 - **Type row**: the config row of type names, one per column: `text`, `box`, `select`, `date`,
-  `currency`, `percentage`. A `!` alone means `text`; `checkbox` is an alias of `box`.
+  `currency`, `percentage`. An empty cell means `text`; `checkbox` is an alias of `box`.
 - **Option rows**: the other config rows, one option per row and column. For `select`, the
-  allowed values; for `currency`, a single ISO currency code such as `USD`. A `!` alone means no
-  option. Write a `|` inside an option as `\|`.
-- **End row**: `===` in every cell, without `!`; it carries nothing and may also be moved by
-  sorting.
-- All other rows are data rows. Never use a second `---` row: Obsidian's table editor deletes it.
+  allowed values; for `currency`, a single ISO currency code such as `USD`. Leave a cell empty for
+  no option. Write a `|` inside an option as `\|`.
+- All other rows are data rows. Never add a second `---` row: Obsidian's table editor deletes it.
 
-Older tables may have the same rows without the `!` (right after the `---`, ended by `===` or
-`---`), or an HTML comment above the table (`<!-- table-fields ... cols: ... -->`) listing
-`{name, type, options}` per column in column order; read them the same way.
+Older tables may have the type and option rows unprefixed right after the `---` row, ended by a
+row of `===` or `---`, or an HTML comment above the table (`<!-- table-fields ... cols: ... -->`)
+listing `{name, type, options}` per column in column order; read them the same way.
 
 ### How values are stored (use these exact forms)
 
@@ -58,8 +55,8 @@ Values are stored in this plain, canonical form; the plugin only formats them on
 
 1. Keep it a valid GFM pipe table: header row, a `---` delimiter row, the config rows, then data
    rows. Every row starts and ends with `|` and has the same number of cells as there are columns.
-2. Start every cell of a type or option row with `!` (a `!` alone for an empty cell); never
-   start every cell of a data row with `!`, and never fill a data row with `===` only.
+2. In type and option rows, start every non-empty cell with `__`. A data row must have at least
+   one non-empty cell that does not start with `__`.
 3. No formulas or computed cells. Percentages and currency are literal values the user maintains.
 4. For `select` cells, only use values listed in that column's option rows; if a new value is
    needed, add it as an option too (add an option row if the column has no free cell left).
@@ -76,21 +73,20 @@ done/true, a currency number is money in that column's currency, `60%` means six
 
 ### Creating or editing a table
 
-- **Create**: write the header row, `---`, the `!`type row, any `!`option rows, a `===` row, then
-  the data rows, using the storage forms above.
+- **Create**: write the header row, `---`, the `__`type row, any `__`option rows, then the data
+  rows, using the storage forms above.
 - **Edit a value**: change only the target cell, keeping its canonical form.
-- **Add a column**: add a cell to every row - header, `---` row, type and option rows (with `!`),
-  `===` row and data rows.
+- **Add a column**: add a cell to every row - header, `---` row, type and option rows and data
+  rows.
 - **Add a data row**: add one pipe row after the config rows with a value per column in
   canonical form.
-- **Change a column's type**: update its cell in the type row (keeping the `!`, and its options if
-  needed), and make sure existing cell values match the new type's storage form.
+- **Change a column's type**: update its cell in the type row (keeping the `__`, and its options
+  if needed), and make sure existing cell values match the new type's storage form.
 
 ### Example
 
 > "Mark 'Draft PRD' as done and add a Priority column with Low/Medium/High."
 
-Set that row's Done cell to `[x]`; add a `Priority` column whose type cell is `!select` and whose
-option cells are `!Low`, `!Medium` and `!High` (adding option rows if needed), with `---` in the
-delimiter row, `===` in the end row, `!` in other config rows and a value such as `High` in every
-data row.
+Set that row's Done cell to `[x]`; add a `Priority` column whose type cell is `__select` and whose
+option cells are `__Low`, `__Medium` and `__High` (adding option rows if needed), with `---` in the
+delimiter row, empty cells in other config rows and a value such as `High` in every data row.
