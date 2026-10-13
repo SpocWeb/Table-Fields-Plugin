@@ -45,7 +45,8 @@ test("delimiter rows are recognized, with or without alignment colons", () => {
 test("type row and option rows become the column config", () => {
 	const parsed = parseTypeRows(TABLE, 0, TABLE.length - 1);
 	assert.strictEqual(parsed.typeLine, 2);
-	assert.strictEqual(parsed.endLine, 6);
+	assert.deepStrictEqual(Array.from(parsed.configLines), [2, 3, 4, 5, 6]);
+	assert.strictEqual(parsed.marked, false);
 	assert.deepStrictEqual(plain(parsed.config.cols), [
 		{ name: "Task", type: "text", options: [] },
 		{ name: "Status", type: "select", options: ["Todo", "Doing", "a|b"] },
@@ -75,7 +76,7 @@ test("an ordinary first data row is not mistaken for a type row", () => {
 test("an older second --- row still closes the type section", () => {
 	const lines = ["| A | B |", "| - | - |", "| text | box |", "|  | x |", "| - | - |", "| a | [ ] |"];
 	const parsed = parseTypeRows(lines, 0, 5);
-	assert.strictEqual(parsed.endLine, 4);
+	assert.deepStrictEqual(Array.from(parsed.configLines), [2, 3, 4]);
 	assert.deepStrictEqual(Array.from(parsed.config.cols[1].options), ["x"]);
 });
 
@@ -94,7 +95,7 @@ test("findSmartTables reports where data rows start", () => {
 	assert.strictEqual(tables.length, 1);
 	assert.strictEqual(tables[0].headerLine, 2);
 	assert.strictEqual(tables[0].typeLine, 4);
-	assert.strictEqual(tables[0].dataStartLine, 9);
+	assert.deepStrictEqual(Array.from(tables[0].configLines), [4, 5, 6, 7, 8]);
 	assert.strictEqual(tables[0].lastRowLine, 10);
 	assert.strictEqual(tables[0].comment, null);
 });
@@ -112,7 +113,7 @@ test("comment-format tables are still found", () => {
 	const [t] = findSmartTables(doc);
 	assert.strictEqual(t.config.cols[0].type, "checkbox");
 	assert.deepStrictEqual({ start: t.comment.start, end: t.comment.end }, { start: 0, end: 3 });
-	assert.strictEqual(t.dataStartLine, 7);
+	assert.deepStrictEqual(Array.from(t.configLines), []);
 	assert.strictEqual(t.typeLine, null);
 });
 
@@ -202,6 +203,53 @@ test("Reading view hides the config rows and keeps row indexes on source lines",
 	// Data rows keep their tbody index: lineStart + 2 + rowIndex is their source line.
 	assert.deepStrictEqual([...new Set(enhanced.map((e) => e.rowIndex))], [5, 6]);
 	assert.strictEqual(doc.split("\n")[2 + 2 + 5].includes("PRD"), true);
+});
+
+// The marked format after sorting by a column: config rows scattered among the data rows.
+const SORTED = [
+	"| Task | Status | Done |", // 0
+	"| ---- | ------ | ---- |", // 1
+	"| PRD  | Doing  | [x]  |", // 2
+	"| ===  | ===    | ===  |", // 3 end row, moved by the sort
+	"| !    | !Done  | !    |", // 4 option row
+	"| Ship | Todo   | [ ]  |", // 5
+	"| !    | !Todo  | !    |", // 6 option row
+	"| !text | !select | !box |", // 7 type row, sorted below its options
+	"| Note | !wow   | [ ]  |", // 8 data: not every cell starts with !
+];
+
+test("marked config rows are found anywhere in the table, the end row without a mark", () => {
+	const parsed = parseTypeRows(SORTED, 0, SORTED.length - 1);
+	assert.strictEqual(parsed.marked, true);
+	assert.strictEqual(parsed.typeLine, 7);
+	assert.deepStrictEqual(Array.from(parsed.configLines), [3, 4, 6, 7]);
+	assert.deepStrictEqual(plain(parsed.config.cols), [
+		{ name: "Task", type: "text", options: [] },
+		{ name: "Status", type: "select", options: ["Done", "Todo"] },
+		{ name: "Done", type: "checkbox", options: [] },
+	]);
+});
+
+test("Live Preview shows the data rows of a sorted marked table and writes types with the mark", () => {
+	const doc = [...SORTED, "", "after"].join("\n");
+	const [deco] = buildSmartTableDecorations(fakeState(doc));
+	const data = deco.deco.widget.data;
+	assert.deepStrictEqual(Array.from(data.rows, (r) => r.cells[0].text.trim()), ["PRD", "Ship", "Note"]);
+	assert.strictEqual(data.typeMark, "!");
+	assert.strictEqual(doc.slice(data.typeCells[2].from, data.typeCells[2].to).trim(), "!box");
+});
+
+test("Reading view hides scattered marked config rows only", () => {
+	const doc = SORTED.join("\n");
+	const { table, rows } = fakeRenderedTable(SORTED.length - 2);
+	const enhanced = [];
+	plugin.module.exports.prototype.enhanceTables.call(
+		{ enhanceCell: (td, col, rowIndex) => enhanced.push(rowIndex) },
+		{ findAll: () => [table] },
+		{ getSectionInfo: () => ({ text: doc, lineStart: 0 }) }
+	);
+	assert.deepStrictEqual(rows.map((r) => r.classes.has("tf-config-row")), [false, true, true, false, true, true, false]);
+	assert.deepStrictEqual([...new Set(enhanced)], [0, 3, 6]);
 });
 
 test("Reading view leaves a comment-format table's rows visible", () => {

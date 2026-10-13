@@ -26,18 +26,19 @@ file, no lock-in.
 ## A type row gives each column its field type
 
 Below the header's `---` line you write a row with each column's type, one row per dropdown
-option, and a row of `===`. The data rows follow:
+option, and a row of `===`. Every cell of the type and option rows starts with `!`, so these rows
+stay together at the top or bottom when you sort the table. The data rows follow:
 
 ```markdown
-| Task           | Status | Due        | Done |
-| -------------- | ------ | ---------- | ---- |
-| text           | select | date       | box  |
-|                | Todo   |            |      |
-|                | Doing  |            |      |
-|                | Done   |            |      |
-| ===            | ===    | ===        | ===  |
-| Draft PRD      | Doing  | 2026-07-22 | [x]  |
-| Review designs | Todo   | 2026-07-24 | [ ]  |
+| Task           | Status  | Due        | Done |
+| -------------- | ------- | ---------- | ---- |
+| !text          | !select | !date      | !box |
+| !              | !Todo   | !          | !    |
+| !              | !Doing  | !          | !    |
+| !              | !Done   | !          | !    |
+| ===            | ===     | ===        | ===  |
+| Draft PRD      | Doing   | 2026-07-22 | [x]  |
+| Review designs | Todo    | 2026-07-24 | [ ]  |
 ```
 
 …and in your note it becomes a table where **Status** is a dropdown, **Due** shows a tidy date, and

@@ -44,7 +44,7 @@ test("inserts a type row and a === row below the header's delimiter", () => {
 			"",
 			"| Task | Done | Due        |",
 			"| ---- | ---- | ---------- |",
-			"| text | box | date |",
+			"| !text | !box | !date |",
 			"| === | === | === |",
 			"| a    | [x]  | 2026-10-13 |",
 			"",
@@ -59,13 +59,14 @@ test("the marked table parses back with the inferred types", () => {
 	const tables = plugin.findSmartTables(editor.text());
 	assert.strictEqual(tables.length, 1);
 	assert.deepStrictEqual(Array.from(tables[0].config.cols, (c) => c.type), ["text", "checkbox", "date"]);
-	assert.strictEqual(tables[0].dataStartLine, 4);
+	assert.deepStrictEqual(Array.from(tables[0].configLines), [2, 3]);
+	assert.strictEqual(tables[0].marked, true);
 });
 
 test("a table without data rows still gets a type section", () => {
 	const editor = fakeEditor("| A | B |\n| - | - |", 0);
 	markTableAsSmart.call({}, editor);
-	assert.strictEqual(editor.text(), "| A | B |\n| - | - |\n| text | text |\n| === | === |");
+	assert.strictEqual(editor.text(), "| A | B |\n| - | - |\n| !text | !text |\n| === | === |");
 });
 
 test("a table that already has type rows is left alone", () => {
