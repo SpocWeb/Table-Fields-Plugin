@@ -33,8 +33,8 @@
  */
 
 const { Plugin, Notice, MarkdownView, Menu, PluginSettingTab, MarkdownRenderer, Component, Keymap, editorInfoField, editorLivePreviewField } = require("obsidian");
-const { StateField, RangeSetBuilder, Prec } = require("@codemirror/state");
-const { EditorView, Decoration, WidgetType } = require("@codemirror/view");
+const { StateField, StateEffect, RangeSetBuilder, Prec } = require("@codemirror/state");
+const { EditorView, Decoration, WidgetType, ViewPlugin } = require("@codemirror/view");
 
 /* ------------------------------ config parsing ------------------------------ */
 
@@ -321,7 +321,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		// that replaces the table's source lines with our own interactive table widget.
 		// Highest precedence: Obsidian's own table widget replaces the same lines, and for
 		// replace decorations on the same range the higher-precedence source wins.
-		this.registerEditorExtension(Prec.highest(smartTableField));
+		this.registerEditorExtension([editedTableField, Prec.highest(smartTableField), resumeTablePlugin]);
 
 		this.addCommand({
 			id: "mark-as-table-fields",
@@ -672,6 +672,11 @@ function renderWidgetCell(td, col, cell, view, md) {
 // Attribute on a widget cell holding the document offset its click moves the cursor to.
 const SOURCE_POS_ATTR = "data-tf-pos";
 
+// Attributes on a widget cell locating the same cell in Obsidian's rendered table:
+// row -1 is the header, 0.. the body rows in source order (config rows included).
+const NATIVE_ROW_ATTR = "data-tf-row";
+const NATIVE_COL_ATTR = "data-tf-col";
+
 // Where a click on a cell puts the cursor: at its text, after the padding space.
 function cellSourcePos(cell) {
 	const lead = (cell.text || "").length - (cell.text || "").trimStart().length;
@@ -722,14 +727,23 @@ class SmartTableWidget extends WidgetType {
 				if (target) app.workspace.openLinkText(target, md.sourcePath, Keymap.isModEvent(evt));
 			});
 		}
-		// A left click on a cell (not on a control or link) puts the cursor into that cell's
-		// source: the widget steps aside and Obsidian's own table editor takes over.
+		// A left click on a cell (not on a control or link) hands the table to Obsidian's own
+		// table editor: the widget steps aside for this table (editedTableField), and the click
+		// is repeated on the same cell of Obsidian's table so its cell editor opens there.
 		wrap.addEventListener("mousedown", (evt) => {
 			const pos = sourcePosOfClick(evt);
+			console.log("[tf] widget mousedown: button", evt.button, "on", evt.target && evt.target.tagName, "-> cursor to", pos);
 			if (pos === null) return;
 			evt.preventDefault();
-			view.dispatch({ selection: { anchor: pos } });
-			view.focus();
+			const cellEl = evt.target.closest("[" + SOURCE_POS_ATTR + "]");
+			const nativeRow = Number(cellEl.getAttribute(NATIVE_ROW_ATTR));
+			const nativeCol = Number(cellEl.getAttribute(NATIVE_COL_ATTR));
+			const range = { from: this.data.from, to: this.data.to, since: Date.now() };
+			view.dispatch({ effects: editTable.of(range), selection: { anchor: pos } });
+			requestAnimationFrame(() => {
+				const ok = clickNativeCell(view, range, nativeRow, nativeCol);
+				console.log("[tf]  -> repeated click on Obsidian's table, row", nativeRow, "col", nativeCol, ok ? "done" : "FAILED: cell not found");
+			});
 		});
 		const table = activeDocument.createElement("table");
 		table.className = "tf-table tf-lp-table";
@@ -742,6 +756,8 @@ class SmartTableWidget extends WidgetType {
 			th.textContent = col.name;
 			th.classList.add("tf-th");
 			if (headerCells[colIndex]) th.setAttribute(SOURCE_POS_ATTR, String(cellSourcePos(headerCells[colIndex])));
+			th.setAttribute(NATIVE_ROW_ATTR, "-1");
+			th.setAttribute(NATIVE_COL_ATTR, String(colIndex));
 			th.setAttr("title", "Right-click to set column type");
 			th.addEventListener("contextmenu", (evt) => {
 				evt.preventDefault();
@@ -759,6 +775,9 @@ class SmartTableWidget extends WidgetType {
 				const col = this.data.config.cols[colIndex];
 				const td = activeDocument.createElement("td");
 				td.setAttribute(SOURCE_POS_ATTR, String(cellSourcePos(cell)));
+				// Obsidian's table shows every source row, config rows included.
+				td.setAttribute(NATIVE_ROW_ATTR, String(row.line - (this.data.headerLine + 2)));
+				td.setAttribute(NATIVE_COL_ATTR, String(colIndex));
 				if (col) renderWidgetCell(td, col, cell, view, md);
 				else renderCellMarkdown(td, unescapePipes((cell.text || "").trim()), md);
 				tr.appendChild(td);
@@ -817,6 +836,8 @@ function buildSmartTableDecorations(state) {
 		const tables = findSmartTables(text);
 		if (!tables.length) return Decoration.none;
 		const sel = state.selection.main;
+		const editedValue = state.field(editedTableField, false);
+		const edited = editedValue && typeof editedValue === "object" ? editedValue : null;
 		const builder = new RangeSetBuilder();
 		for (const t of tables) {
 			// Replace the table, type rows included; a config comment above stays visible.
@@ -825,6 +846,7 @@ function buildSmartTableDecorations(state) {
 			const from = fromLine.from;
 			const to = toLine.to;
 			if (sel.to >= from && sel.from <= to) continue; // cursor inside table -> show source
+			if (edited && edited.from <= to && edited.to >= from) continue; // handed to Obsidian's table editor
 
 			const rows = [];
 			const sigParts = [];
@@ -833,7 +855,7 @@ function buildSmartTableDecorations(state) {
 				if (configLines.has(ln)) continue; // type, option and end rows are not data
 				const line = state.doc.line(ln + 1);
 				const cells = getCellRanges(line.text, line.from);
-				rows.push({ cells });
+				rows.push({ cells, line: ln });
 				sigParts.push(cells.map((c) => c.text).join("|"));
 			}
 			const signature =
@@ -849,7 +871,9 @@ function buildSmartTableDecorations(state) {
 			}
 			const typeMark = t.marked ? CONFIG_MARK : "";
 			const headerCells = getCellRanges(fromLine.text, fromLine.from);
-			const widget = new SmartTableWidget({ config: t.config, rows, signature, configRange, typeCells, typeMark, headerCells });
+			const widget = new SmartTableWidget({
+				config: t.config, rows, signature, configRange, typeCells, typeMark, headerCells, from, to, headerLine: t.headerLine,
+			});
 			builder.add(from, to, Decoration.replace({ widget, block: true }));
 		}
 		return builder.finish();
@@ -868,13 +892,114 @@ const smartTableField = StateField.define({
 		// editor is created), or the table only appears once the cursor moves.
 		const modeChanged =
 			tr.startState.field(editorLivePreviewField, false) !== tr.state.field(editorLivePreviewField, false);
-		if (!tr.docChanged && !tr.selection && !modeChanged && !tr.reconfigured) return deco;
+		const editChanged = (tr.effects || []).some((e) => e.is && e.is(editTable));
+		if (!tr.docChanged && !tr.selection && !modeChanged && !tr.reconfigured && !editChanged) return deco;
 		return buildSmartTableDecorations(tr.state);
 	},
 	provide(f) {
 		return EditorView.decorations.from(f);
 	},
 });
+
+/* --- click to edit: hand a table to Obsidian's table editor and take it back after --- */
+
+// Sets the table being edited in Obsidian's table editor ({ from, to, since }) or null.
+const editTable = StateEffect.define();
+
+// The table the widget stepped aside for, its range mapped through edits; null if none.
+const editedTableField = StateField.define({
+	create() {
+		return null;
+	},
+	update(value, tr) {
+		let next = value && tr.docChanged
+			? { from: tr.changes.mapPos(value.from, -1), to: tr.changes.mapPos(value.to, 1), since: value.since }
+			: value;
+		for (const e of tr.effects || []) {
+			if (e.is && e.is(editTable)) next = e.value;
+		}
+		return next;
+	},
+});
+
+// Whether the edited table should get its widget back: the edit started a moment ago at the
+// earliest, the cursor is outside the table source, and the focus is not in one of
+// Obsidian's cell editors of that table.
+function shouldResumeTable(edited, head, now, focusInTable) {
+	if (!edited) return false;
+	if (now - edited.since < 500) return false;
+	if (head >= edited.from && head <= edited.to) return false;
+	return !focusInTable;
+}
+
+// Obsidian's own rendered table for the table source in range, or null.
+function nativeTableElement(view, range) {
+	for (const el of view.dom.querySelectorAll(".cm-table-widget, .cm-embed-block")) {
+		let pos;
+		try {
+			pos = view.posAtDOM(el);
+		} catch (e) {
+			continue;
+		}
+		if (pos >= range.from && pos <= range.to && el.querySelector("table")) return el;
+	}
+	return null;
+}
+
+// Repeats a left click on cell (row, col) of Obsidian's table for range: row -1 is the
+// header row, 0.. the body rows in source order. Returns whether the cell was found.
+function clickNativeCell(view, range, row, col) {
+	const widget = nativeTableElement(view, range);
+	const table = widget && widget.querySelector("table");
+	if (!table) return false;
+	const tr = row < 0 ? table.tHead && table.tHead.rows[0] : table.tBodies[0] && table.tBodies[0].rows[row];
+	const cell = tr && tr.cells[col];
+	if (!cell) return false;
+	const target = cell.querySelector(".table-cell-wrapper, .cm-editor, .cm-content") || cell;
+	const box = target.getBoundingClientRect();
+	const init = {
+		bubbles: true, cancelable: true, button: 0, buttons: 1,
+		clientX: box.left + Math.min(8, box.width / 2), clientY: box.top + box.height / 2,
+	};
+	for (const type of ["mousedown", "mouseup", "click"]) target.dispatchEvent(new MouseEvent(type, init));
+	return true;
+}
+
+// Gives the edited table its widget back once the user has left it (shouldResumeTable).
+const resumeTablePlugin = ViewPlugin.fromClass(
+	class {
+		constructor(view) {
+			this.view = view;
+			this.onFocus = () => this.schedule();
+			view.dom.ownerDocument.addEventListener("focusin", this.onFocus);
+		}
+		update(u) {
+			if (u.selectionSet || u.focusChanged || u.docChanged) this.schedule();
+		}
+		schedule() {
+			clearTimeout(this.timer);
+			this.timer = setTimeout(() => this.check(), 50);
+		}
+		check() {
+			const edited = this.view.state.field(editedTableField, false);
+			if (!edited) return;
+			const native = nativeTableElement(this.view, edited);
+			const active = this.view.dom.ownerDocument.activeElement;
+			const focusInTable = !!(native && active && native.contains(active));
+			const head = this.view.state.selection.main.head;
+			if (shouldResumeTable(edited, head, Date.now(), focusInTable)) {
+				console.log("[tf] left the edited table -> widget back");
+				this.view.dispatch({ effects: editTable.of(null) });
+			} else if (Date.now() - edited.since < 500) {
+				this.schedule();
+			}
+		}
+		destroy() {
+			clearTimeout(this.timer);
+			this.view.dom.ownerDocument.removeEventListener("focusin", this.onFocus);
+		}
+	}
+);
 
 /* ============================================================================
  * Settings tab — two sub-tabs: "Usage guide" and "AI skill" (copy-paste).

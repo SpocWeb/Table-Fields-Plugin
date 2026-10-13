@@ -13,7 +13,7 @@ const vm = require("node:vm");
 function loadPlugin(obsidian = {}) {
 	const src = fs.readFileSync(path.join(__dirname, "..", "main.js"), "utf8");
 	const stub = new Proxy({}, {
-		get: (_, name) => (name in obsidian ? obsidian[name] : class { static define() { return {}; } }),
+		get: (_, name) => (name in obsidian ? obsidian[name] : class { static define() { return {}; } static fromClass() { return {}; } }),
 	});
 	const ctx = { require: () => stub, module: { exports: {} }, console };
 	vm.createContext(ctx);
