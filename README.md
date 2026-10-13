@@ -32,7 +32,7 @@ you sort the table by a column. The data rows follow:
 ```markdown
 | Task           | Status   | Due        | Done  |
 | -------------- | -------- | ---------- | ----- |
-| __text         | __select | __date     | __box |
+| __text         | __select | __date     | __    |
 |                | __Todo   |            |       |
 |                | __Doing  |            |       |
 |                | __Done   |            |       |

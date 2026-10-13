@@ -20,7 +20,7 @@ They usually follow the header's `---` row, but sorting the table may move them 
 ```markdown
 | Task   | Status   | Due    | Amount     | Done  |
 | ----   | ------   | ----   | --------   | ----  |
-| __text | __select | __date | __currency | __box |
+| __text | __select | __date | __currency | __    |
 |        | __Todo   |        | __USD      |       |
 |        | __Doing  |        |            |       |
 |        | __Done   |        |            |       |
@@ -28,7 +28,8 @@ They usually follow the header's `---` row, but sorting the table may move them 
 ```
 
 - **Type row**: the config row of type names, one per column: `text`, `box`, `select`, `date`,
-  `currency`, `percentage`. An empty cell means `text`; `checkbox` is an alias of `box`.
+  `currency`, `percentage`. An empty cell means `text`, a lone `__` means `box`; `checkbox` is an
+  alias of `box`.
 - **Option rows**: the other config rows, one option per row and column. For `select`, the
   allowed values; for `currency`, a single ISO currency code such as `USD`. Leave a cell empty for
   no option. Write a `|` inside an option as `\|`.

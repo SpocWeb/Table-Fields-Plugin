@@ -19,7 +19,7 @@
  * by their cells wherever a sort by column moves them:
  *   | Task   | Status   | Due    | Amount     | Done  |
  *   | ----   | ------   | ----   | --------   | ----  |
- *   | __text | __select | __date | __currency | __box |
+ *   | __text | __select | __date | __currency | __    |
  *   |        | __Todo   |        | __USD      |       |
  *   |        | __Doing  |        |            |       |
  *   | PRD    | Doing    | 2026-07-22 | 1200   | [x]   |
@@ -119,6 +119,16 @@ function unmarkedCells(line) {
 	return splitRowCells(line).map((c) => (c.startsWith(CONFIG_MARK) ? c.slice(CONFIG_MARK.length).trim() : c));
 }
 
+// The type names of a config row read as type row: a lone CONFIG_MARK is the shortcut for box.
+function typeCellsOf(line) {
+	return splitRowCells(line).map((c) => (c === CONFIG_MARK ? "box" : c.startsWith(CONFIG_MARK) ? c.slice(CONFIG_MARK.length).trim() : c));
+}
+
+// A type as written into a type row: box as the lone CONFIG_MARK, others prefixed.
+function typeCellText(type) {
+	return fieldType(type) === "checkbox" ? CONFIG_MARK : CONFIG_MARK + type;
+}
+
 // Whether cells are column types: each a known type or empty, at least one not empty.
 function isTypeCells(cells) {
 	return cells.some((t) => t !== "") && cells.every((t) => t === "" || FIELD_TYPES.includes(t.toLowerCase()));
@@ -142,7 +152,7 @@ function configOf(headerCells, typeCells, optionRows) {
 // Config encoded inside the table itself in rows of only "__"-prefixed and empty cells:
 //   | Task   | Status   | Due    |    <- header
 //   | ----   | ------   | ----   |    <- delimiter
-//   | __text | __select | __date |    <- type row (empty means text, box = checkbox)
+//   | __text | __select | __     |    <- type row (empty = text, a lone __ = box = checkbox)
 //   |        | __Todo   |        |    <- option rows: one option per row and column
 //   |        | __Done   |        |
 //   | PRD    | Doing    | ...    |    <- data rows
@@ -154,10 +164,10 @@ function parseMarkedRows(lines, headerLine, lastRowLine) {
 	for (let ln = headerLine + 2; ln <= lastRowLine; ln++) {
 		if (isMarkedRow(lines[ln])) configLines.push(ln);
 	}
-	const typeLine = configLines.find((ln) => isTypeCells(unmarkedCells(lines[ln])));
+	const typeLine = configLines.find((ln) => isTypeCells(typeCellsOf(lines[ln])));
 	if (typeLine === undefined) return null;
 	const optionRows = configLines.filter((ln) => ln !== typeLine).map((ln) => unmarkedCells(lines[ln]));
-	const config = configOf(splitRowCells(lines[headerLine]), unmarkedCells(lines[typeLine]), optionRows);
+	const config = configOf(splitRowCells(lines[headerLine]), typeCellsOf(lines[typeLine]), optionRows);
 	return { config, typeLine, configLines, marked: true };
 }
 
@@ -506,7 +516,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		const headerCells = splitRowCells(lines[top]);
 		const sampleCells = top + 2 <= bottom ? splitRowCells(lines[top + 2]) : [];
 		const types = headerCells.map((_, i) => inferType((sampleCells[i] || "").trim()));
-		const typeRow = "| " + types.map((t) => CONFIG_MARK + t).join(" | ") + " |";
+		const typeRow = "| " + types.map(typeCellText).join(" | ") + " |";
 
 		editor.replaceRange("\n" + typeRow, { line: top + 1, ch: delimiter.length });
 		new Notice(
@@ -743,7 +753,7 @@ class SmartTableWidget extends WidgetType {
 					.onClick(() => {
 						if (this.data.typeCells) {
 							const cell = this.data.typeCells[colIndex];
-							if (cell) dispatchCell(view, cell, (this.data.typeMark || "") + ty);
+							if (cell) dispatchCell(view, cell, this.data.typeMark ? typeCellText(ty) : ty);
 							return;
 						}
 						// The comment format keeps the long name the original plugin reads.
@@ -862,14 +872,14 @@ function buildUsageMd(img) {
 	"",
 	"    | Task      | Status   | Due        | Done  |",
 	"    | --------- | -------- | ---------- | ----- |",
-	"    | __text    | __select | __date     | __box |",
+	"    | __text    | __select | __date     | __    |",
 	"    |           | __Todo   |            |       |",
 	"    |           | __Doing  |            |       |",
 	"    |           | __Done   |            |       |",
 	"    | Draft PRD | Doing    | 2026-07-22 | [x]   |",
 	"",
-	"An empty type cell means text. The plugin hides these rows when it shows the table, and finds",
-	"them wherever sorting the table by a column moves them.",
+	"An empty type cell means text, a lone __ means a checkbox (box). The plugin hides these rows",
+	"when it shows the table, and finds them wherever sorting the table by a column moves them.",
 	"",
 	"Or: put your cursor in any normal table and run the command **Table Fields: Mark table under",
 	"cursor as Table Fields** — it adds the type row from your data. Then right-click a header to",
@@ -914,14 +924,14 @@ const SKILL_TEXT = [
 	"",
 	"    | Task   | Status   | Due    | Amount     | Done  |",
 	"    | ----   | ------   | ----   | --------   | ----  |",
-	"    | __text | __select | __date | __currency | __box |",
+	"    | __text | __select | __date | __currency | __    |",
 	"    |        | __Todo   |        | __USD      |       |",
 	"    |        | __Doing  |        |            |       |",
 	"    |        | __Done   |        |            |       |",
 	"    | ...    | ...      | ...    | ...        | ...   |",
 	"",
 	"- Type row: the config row of type names, one per column: text, box, select, date, currency,",
-	"  percentage. An empty cell means text; checkbox is an alias of box.",
+	"  percentage. An empty cell means text, a lone __ means box; checkbox is an alias of box.",
 	"- Option rows: the other config rows, one option per row and column. For select, the allowed",
 	"  values; for currency, a single ISO currency code such as USD. Leave a cell empty for no",
 	"  option. Write a | inside an option as \\|.",

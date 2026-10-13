@@ -235,6 +235,11 @@ test("an empty type cell means text in the __ format", () => {
 	assert.deepStrictEqual(Array.from(parseTypeRows(lines, 0, 3).config.cols, (c) => c.type), ["text", "checkbox"]);
 });
 
+test("a lone __ in the type row is the shortcut for box", () => {
+	const lines = ["| A | B | C |", "| - | - | - |", "| __text | __ | __checkbox |", "| x | [ ] | [x] |"];
+	assert.deepStrictEqual(Array.from(parseTypeRows(lines, 0, 3).config.cols, (c) => c.type), ["text", "checkbox", "checkbox"]);
+});
+
 test("Live Preview shows the data rows of a sorted table and writes types with the __ prefix", () => {
 	const doc = [...SORTED, "", "after"].join("\n");
 	const [deco] = buildSmartTableDecorations(fakeState(doc));

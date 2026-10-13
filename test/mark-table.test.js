@@ -44,7 +44,7 @@ test("inserts a type row below the header's delimiter", () => {
 			"",
 			"| Task | Done | Due        |",
 			"| ---- | ---- | ---------- |",
-			"| __text | __box | __date |",
+			"| __text | __ | __date |",
 			"| a    | [x]  | 2026-10-13 |",
 			"",
 			"Outro",
