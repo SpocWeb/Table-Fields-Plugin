@@ -17,18 +17,19 @@ below. Never add formulas and never convert a table into a database or JSON.
 Between the header's `---` delimiter row and a second `---` delimiter row, a Table Fields table has:
 
 ```markdown
-| Task | Status | Due  | Amount   | Done     |
-| ---- | ------ | ---- | -------- | -------- |
-| text | select | date | currency | checkbox |
-|      | Todo   |      | USD      |          |
-|      | Doing  |      |          |          |
-|      | Done   |      |          |          |
-| ---- | ------ | ---- | -------- | -------- |
-| ...  | ...    | ...  | ...      | ...      |
+| Task | Status | Due  | Amount   | Done |
+| ---- | ------ | ---- | -------- | ---- |
+| text | select | date | currency | box  |
+|      | Todo   |      | USD      |      |
+|      | Doing  |      |          |      |
+|      | Done   |      |          |      |
+| ---- | ------ | ---- | -------- | ---- |
+| ...  | ...    | ...  | ...      | ...  |
 ```
 
 - **Type row** (first row after the header's `---`): one type per column, one of `text`,
-  `checkbox`, `select`, `date`, `currency`, `percentage`. An empty cell means `text`.
+  `box`, `select`, `date`, `currency`, `percentage`. An empty cell means `text`; `checkbox` is an
+  alias of `box`.
 - **Option rows** (zero or more, before the second `---`): one option per row and column. For
   `select`, the allowed values; for `currency`, a single ISO currency code such as `USD`. Leave
   cells empty where a column has fewer options. Write a `|` inside an option as `\|`.
@@ -43,7 +44,7 @@ read it the same way.
 | type | stored in the cell as | example |
 | --- | --- | --- |
 | text | plain text | `Draft PRD` |
-| checkbox | `[x]` (checked) or `[ ]` (unchecked) | `[x]` |
+| box | `[x]` (checked) or `[ ]` (unchecked) | `[x]` |
 | select | the exact option text | `Doing` |
 | date | ISO `YYYY-MM-DD` | `2026-07-22` |
 | currency | a plain number, no symbol/commas | `1200.50` |
@@ -60,7 +61,7 @@ Values are stored in this plain, canonical form; the plugin only formats them on
 3. No formulas or computed cells. Percentages and currency are literal values the user maintains.
 4. For `select` cells, only use values listed in that column's option rows; if a new value is
    needed, add it as an option too (add an option row if the column has no free cell left).
-5. For `checkbox` cells, only use `[x]` or `[ ]`.
+5. For `box` cells, only use `[x]` or `[ ]`.
 6. For dates, always write ISO `YYYY-MM-DD` in the source (the plugin displays them localized).
 7. For currency, store the number only (e.g. `59.00`); the symbol comes from the column's option.
 8. Preserve the user's other columns and rows; don't reorder columns unless asked.

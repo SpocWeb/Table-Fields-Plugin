@@ -18,7 +18,7 @@
  * per row and column), then a second delimiter before the data rows (see parseTypeRows):
  *   | Task | Status | Due  | Amount   | Done     |
  *   | ---- | ------ | ---- | -------- | -------- |
- *   | text | select | date | currency | checkbox |
+ *   | text | select | date | currency | box      |
  *   |      | Todo   |      | USD      |          |
  *   |      | Doing  |      |          |          |
  *   |      | Done   |      |          |          |
@@ -49,7 +49,7 @@ function parseConfigBlock(raw) {
 	while ((m = colRe.exec(raw)) !== null) {
 		const body = m[1];
 		const name = (body.match(/name\s*:\s*"([^"]*)"/) || [])[1] || "";
-		const type = (body.match(/type\s*:\s*"([^"]*)"/) || [])[1] || "text";
+		const type = fieldType((body.match(/type\s*:\s*"([^"]*)"/) || [])[1]) || "text";
 		let options = [];
 		const optM = body.match(/options\s*:\s*\[([^\]]*)\]/);
 		if (optM) {
@@ -81,7 +81,14 @@ function findCommentAbove(lines, headerLine) {
 	return { start, end: i, config: parseConfigBlock(inner) };
 }
 
-const FIELD_TYPES = ["text", "checkbox", "select", "date", "currency", "percentage"];
+// Type names as written; `box` is the short name of `checkbox`, both are accepted.
+const FIELD_TYPES = ["text", "box", "checkbox", "select", "date", "currency", "percentage"];
+
+// The internal type of a written type name: lower case, `box` read as `checkbox`.
+function fieldType(name) {
+	const t = (name || "").trim().toLowerCase();
+	return t === "box" ? "checkbox" : t;
+}
 
 // A GFM delimiter row: every cell is dashes with optional alignment colons.
 function isDelimiterRow(line) {
@@ -93,7 +100,7 @@ function isDelimiterRow(line) {
 // Config encoded inside the table itself, between the delimiter and a second one:
 //   | Task | Status | Due  |    <- header
 //   | ---- | ------ | ---- |    <- delimiter
-//   | text | select | date |    <- type row (an empty cell means text)
+//   | text | select | date |    <- type row (an empty cell means text, box = checkbox)
 //   |      | Todo   |      |    <- option rows: one option per row and column
 //   |      | Done   |      |
 //   | ---- | ------ | ---- |    <- second delimiter; data rows follow
@@ -109,7 +116,7 @@ function parseTypeRows(lines, headerLine, lastRowLine) {
 	if (endLine > lastRowLine) return null;
 	const cols = splitRowCells(lines[headerLine]).map((name, i) => ({
 		name: unescapePipes(name),
-		type: types[i] || "text",
+		type: fieldType(types[i]) || "text",
 		options: [],
 	}));
 	for (let ln = typeLine + 1; ln < endLine; ln++) {
@@ -460,7 +467,7 @@ function splitRowCells(line) {
 }
 
 function inferType(sample) {
-	if (CHECKBOX_RE.test(sample)) return "checkbox";
+	if (CHECKBOX_RE.test(sample)) return "box";
 	if (/^\d{4}-\d{2}-\d{2}$/.test(sample)) return "date";
 	if (/^\d+(\.\d+)?%$/.test(sample)) return "percentage";
 	if (/^\d+(\.\d+)?$/.test(sample)) return "currency";
@@ -667,20 +674,21 @@ class SmartTableWidget extends WidgetType {
 		const menu = new Menu();
 		menu.addItem((i) => i.setTitle("Column: " + col.name).setDisabled(true));
 		menu.addSeparator();
-		const types = ["text", "checkbox", "select", "date", "currency", "percentage"];
+		const types = ["text", "box", "select", "date", "currency", "percentage"];
 		for (const ty of types) {
 			menu.addItem((item) => {
 				item
 					.setTitle(ty)
-					.setChecked(col.type === ty)
+					.setChecked(col.type === fieldType(ty))
 					.onClick(() => {
 						if (this.data.typeCells) {
 							const cell = this.data.typeCells[colIndex];
 							if (cell) dispatchCell(view, cell, ty);
 							return;
 						}
+						// The comment format keeps the long name the original plugin reads.
 						const cols = this.data.config.cols.map((c, i) =>
-							i === colIndex ? Object.assign({}, c, { type: ty }) : c
+							i === colIndex ? Object.assign({}, c, { type: fieldType(ty) }) : c
 						);
 						const cfg = { id: this.data.config.id, version: this.data.config.version, cols };
 						view.dispatch({
@@ -789,14 +797,14 @@ function buildUsageMd(img) {
 	"Below the header's --- line, add a row with each column's type, then one row per dropdown",
 	"option (or currency code), then a second --- line. Your data rows follow:",
 	"",
-	"    | Task      | Status | Due        | Done     |",
-	"    | --------- | ------ | ---------- | -------- |",
-	"    | text      | select | date       | checkbox |",
-	"    |           | Todo   |            |          |",
-	"    |           | Doing  |            |          |",
-	"    |           | Done   |            |          |",
-	"    | --------- | ------ | ---------- | -------- |",
-	"    | Draft PRD | Doing  | 2026-07-22 | [x]      |",
+	"    | Task      | Status | Due        | Done |",
+	"    | --------- | ------ | ---------- | ---- |",
+	"    | text      | select | date       | box  |",
+	"    |           | Todo   |            |      |",
+	"    |           | Doing  |            |      |",
+	"    |           | Done   |            |      |",
+	"    | --------- | ------ | ---------- | ---- |",
+	"    | Draft PRD | Doing  | 2026-07-22 | [x]  |",
 	"",
 	"An empty type cell means text. The plugin hides the type and option rows when it shows the table.",
 	"",
@@ -811,7 +819,7 @@ function buildUsageMd(img) {
 	"## Field types",
 	"",
 	"- **text** — plain text.",
-	"- **checkbox** — stored as [x] or [ ], shown as a clickable box.",
+	"- **box** (or **checkbox**) — stored as [x] or [ ], shown as a clickable box.",
 	"- **select** — a dropdown; the choices come from the column's options list.",
 	"- **date** — stored as YYYY-MM-DD, shown in your local date style.",
 	"- **currency** — a plain number (e.g. 1200.00); the symbol comes from options (e.g. USD).",
@@ -840,17 +848,17 @@ const SKILL_TEXT = [
 	"THE TYPE SECTION",
 	"Between the header's --- delimiter row and a second --- delimiter row, a Table Fields table has:",
 	"",
-	"    | Task | Status | Due  | Amount   | Done     |",
-	"    | ---- | ------ | ---- | -------- | -------- |",
-	"    | text | select | date | currency | checkbox |",
-	"    |      | Todo   |      | USD      |          |",
-	"    |      | Doing  |      |          |          |",
-	"    |      | Done   |      |          |          |",
-	"    | ---- | ------ | ---- | -------- | -------- |",
-	"    | ...  | ...    | ...  | ...      | ...      |",
+	"    | Task | Status | Due  | Amount   | Done |",
+	"    | ---- | ------ | ---- | -------- | ---- |",
+	"    | text | select | date | currency | box  |",
+	"    |      | Todo   |      | USD      |      |",
+	"    |      | Doing  |      |          |      |",
+	"    |      | Done   |      |          |      |",
+	"    | ---- | ------ | ---- | -------- | ---- |",
+	"    | ...  | ...    | ...  | ...      | ...  |",
 	"",
-	"- Type row (first row after the header's ---): one type per column, one of: text, checkbox,",
-	"  select, date, currency, percentage. An empty cell means text.",
+	"- Type row (first row after the header's ---): one type per column, one of: text, box,",
+	"  select, date, currency, percentage. An empty cell means text; checkbox is an alias of box.",
 	"- Option rows (zero or more, before the second ---): one option per row and column. For select,",
 	"  the allowed values; for currency, a single ISO currency code such as USD. Leave cells empty",
 	"  where a column has fewer options. Write a | inside an option as \\|.",
@@ -860,7 +868,7 @@ const SKILL_TEXT = [
 	"",
 	"HOW VALUES ARE STORED (use these exact forms when writing cells)",
 	"- text: plain text. Example: Draft PRD",
-	"- checkbox: [x] for checked, [ ] for unchecked.",
+	"- box: [x] for checked, [ ] for unchecked.",
 	"- select: the exact option text. Example: Doing",
 	"- date: ISO date YYYY-MM-DD. Example: 2026-07-22",
 	"- currency: a plain number, no symbol or commas. Example: 1200.50",
@@ -875,7 +883,7 @@ const SKILL_TEXT = [
 	"3. Do not invent formulas or computed cells. Percentages and currency are literal values.",
 	"4. For select cells, only use values listed in that column's option rows. If a new value is",
 	"   needed, add it as an option too (add an option row if the column has no free cell left).",
-	"5. For checkbox cells, only use [x] or [ ].",
+	"5. For box cells, only use [x] or [ ].",
 	"6. For dates, always write ISO YYYY-MM-DD in the source (the plugin displays them localized).",
 	"7. For currency, store the number only (e.g. 59.00); the symbol comes from the column's option.",
 	"8. Preserve the user's other columns and rows; do not reorder columns unless asked.",

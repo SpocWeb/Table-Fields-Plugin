@@ -60,6 +60,13 @@ test("empty type cells mean text, type names are case-insensitive", () => {
 	assert.deepStrictEqual(Array.from(parseTypeRows(lines, 0, 4).config.cols, (c) => c.type), ["text", "checkbox"]);
 });
 
+test("box is the short name of checkbox, in type rows and in comments", () => {
+	const rows = ["| A | B | C |", "| - | - | - |", "| box | Box | checkbox |", "| - | - | - |", "| [x] | [ ] | [ ] |"];
+	assert.deepStrictEqual(Array.from(parseTypeRows(rows, 0, 4).config.cols, (c) => c.type), ["checkbox", "checkbox", "checkbox"]);
+	const doc = ["<!-- table-fields id=\"t\" v=\"1\"", "cols:", "  - {name: \"Done\", type: \"box\"}", "-->", "", "| Done |", "| ---- |", "| [x]  |"].join("\n");
+	assert.strictEqual(findSmartTables(doc)[0].config.cols[0].type, "checkbox");
+});
+
 test("an ordinary first data row is not mistaken for a type row", () => {
 	const lines = ["| A | B |", "| - | - |", "| hello | date |", "| - | - |"];
 	assert.strictEqual(parseTypeRows(lines, 0, 3), null);

@@ -29,15 +29,15 @@ Below the header's `---` line you write a row with each column's type, one row p
 option, and a second `---` line. The data rows follow:
 
 ```markdown
-| Task           | Status | Due        | Done     |
-| -------------- | ------ | ---------- | -------- |
-| text           | select | date       | checkbox |
-|                | Todo   |            |          |
-|                | Doing  |            |          |
-|                | Done   |            |          |
-| -------------- | ------ | ---------- | -------- |
-| Draft PRD      | Doing  | 2026-07-22 | [x]      |
-| Review designs | Todo   | 2026-07-24 | [ ]      |
+| Task           | Status | Due        | Done |
+| -------------- | ------ | ---------- | ---- |
+| text           | select | date       | box  |
+|                | Todo   |            |      |
+|                | Doing  |            |      |
+|                | Done   |            |      |
+| -------------- | ------ | ---------- | ---- |
+| Draft PRD      | Doing  | 2026-07-22 | [x]  |
+| Review designs | Todo   | 2026-07-24 | [ ]  |
 ```
 
 …and in your note it becomes a table where **Status** is a dropdown, **Due** shows a tidy date, and
@@ -76,7 +76,7 @@ open it again to refresh the rendered dropdown.
 1. Write a normal Markdown table.
 2. Put your cursor in it and run the command **"Table Fields: Mark table under cursor as Table
    Fields"** — it looks at your data and sets up the columns for you.
-3. Want to change a column? **Right-click its header** and pick the type (text, checkbox, dropdown,
+3. Want to change a column? **Right-click its header** and pick the type (text, box, dropdown,
    date, money, or percent).
 
 That's it. Click your checkboxes and dropdowns; everything saves back into the note automatically.

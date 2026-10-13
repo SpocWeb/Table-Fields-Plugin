@@ -44,7 +44,7 @@ test("inserts a type row and a second delimiter below the header's delimiter", (
 			"",
 			"| Task | Done | Due        |",
 			"| ---- | ---- | ---------- |",
-			"| text | checkbox | date |",
+			"| text | box | date |",
 			"| ---- | ---- | ---------- |",
 			"| a    | [x]  | 2026-10-13 |",
 			"",
