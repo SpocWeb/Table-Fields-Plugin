@@ -1,9 +1,10 @@
 "use strict";
 
 /*
- * Tests the "Mark table under cursor as Table Fields" command: the config comment it
- * inserts is followed by an empty line, which Obsidian needs to render the table.
- * The editor is a minimal fake that applies replaceRange to an array of lines. Run: npm test
+ * Tests the "Mark table under cursor as Table Fields" command: it inserts a type row
+ * (inferred from the first data row) and a second delimiter row below the header's
+ * delimiter, and leaves tables alone that already have types (type rows or a comment).
+ * The editor is a minimal fake over a string. Run: npm test
  */
 
 const { test } = require("node:test");
@@ -13,47 +14,79 @@ const { loadPlugin } = require("./load-plugin");
 const plugin = loadPlugin();
 const markTableAsSmart = plugin.module.exports.prototype.markTableAsSmart;
 
-// Minimal Editor: line-based document, insert-only replaceRange at { line, ch: 0 }.
+// Minimal Editor over a string document; replaceRange inserts at { line, ch }.
 function fakeEditor(text, cursorLine) {
-	let lines = text.split("\n");
+	let doc = text;
+	const lines = () => doc.split("\n");
 	return {
 		getCursor: () => ({ line: cursorLine, ch: 0 }),
-		lineCount: () => lines.length,
-		getLine: (n) => lines[n],
+		lineCount: () => lines().length,
+		getLine: (n) => lines()[n],
 		replaceRange: (insert, pos) => {
-			assert.strictEqual(pos.ch, 0);
-			lines = [...lines.slice(0, pos.line), ...(insert + lines[pos.line]).split("\n"), ...lines.slice(pos.line + 1)];
+			const ls = lines();
+			let offset = pos.ch;
+			for (let n = 0; n < pos.line; n++) offset += ls[n].length + 1;
+			doc = doc.slice(0, offset) + insert + doc.slice(offset);
 		},
-		text: () => lines.join("\n"),
+		text: () => doc,
 	};
 }
 
-const TABLE = ["| Task | Done |", "| ---- | ---- |", "| a    | [x]  |"].join("\n");
+const TABLE = ["| Task | Done | Due        |", "| ---- | ---- | ---------- |", "| a    | [x]  | 2026-10-13 |"].join("\n");
 
-test("inserted comment is followed by one empty line, then the table", () => {
+test("inserts a type row and a second delimiter below the header's delimiter", () => {
 	const editor = fakeEditor("Intro\n\n" + TABLE + "\n\nOutro", 4);
 	markTableAsSmart.call({}, editor);
-	const lines = editor.text().split("\n");
-	const end = lines.indexOf("-->");
-	assert.ok(end > 0, "comment end found");
-	assert.strictEqual(lines[end + 1], "");
-	assert.strictEqual(lines[end + 2], "| Task | Done |");
-	assert.ok(lines[2].startsWith("<!-- table-fields id=\"task\""));
+	assert.strictEqual(
+		editor.text(),
+		[
+			"Intro",
+			"",
+			"| Task | Done | Due        |",
+			"| ---- | ---- | ---------- |",
+			"| text | checkbox | date |",
+			"| ---- | ---- | ---------- |",
+			"| a    | [x]  | 2026-10-13 |",
+			"",
+			"Outro",
+		].join("\n")
+	);
 });
 
-test("inferred column types are written into the comment", () => {
+test("the marked table parses back with the inferred types", () => {
 	const editor = fakeEditor(TABLE, 0);
 	markTableAsSmart.call({}, editor);
-	const text = editor.text();
-	assert.ok(text.includes("{name: \"Task\", type: \"text\"}"));
-	assert.ok(text.includes("{name: \"Done\", type: \"checkbox\"}"));
+	const tables = plugin.findSmartTables(editor.text());
+	assert.strictEqual(tables.length, 1);
+	assert.deepStrictEqual(Array.from(tables[0].config.cols, (c) => c.type), ["text", "checkbox", "date"]);
+	assert.strictEqual(tables[0].dataStartLine, 4);
 });
 
-test("a table that already has a config comment is left alone", () => {
+test("a table without data rows still gets a type section", () => {
+	const editor = fakeEditor("| A | B |\n| - | - |", 0);
+	markTableAsSmart.call({}, editor);
+	assert.strictEqual(editor.text(), "| A | B |\n| - | - |\n| text | text |\n| - | - |");
+});
+
+test("a table that already has type rows is left alone", () => {
 	const editor = fakeEditor(TABLE, 0);
 	markTableAsSmart.call({}, editor);
 	const once = editor.text();
-	const again = fakeEditor(once, once.split("\n").indexOf("| Task | Done |"));
+	const again = fakeEditor(once, 0);
 	markTableAsSmart.call({}, again);
 	assert.strictEqual(again.text(), once);
+});
+
+test("a table with a config comment is left alone", () => {
+	const doc = "<!-- table-fields id=\"t\" v=\"1\"\ncols:\n  - {name: \"Task\", type: \"text\"}\n-->\n\n" + TABLE;
+	const editor = fakeEditor(doc, 5);
+	markTableAsSmart.call({}, editor);
+	assert.strictEqual(editor.text(), doc);
+});
+
+test("a pipe line without a delimiter row below is not touched", () => {
+	const doc = "a | b\nnot a delimiter";
+	const editor = fakeEditor(doc, 0);
+	markTableAsSmart.call({}, editor);
+	assert.strictEqual(editor.text(), doc);
 });

@@ -129,3 +129,8 @@
 .tf-lp-table td.tf-cell-md > p {
 	margin: 0;
 }
+
+/* Reading view: type row, option rows and second delimiter are config, not data */
+.tf-table tr.tf-config-row {
+	display: none;
+}

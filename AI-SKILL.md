@@ -8,37 +8,35 @@ available inside the plugin: **Settings → Table Fields → AI skill → Copy t
 
 You are assisting a user who uses the Table Fields plugin for Obsidian. Table Fields adds typed,
 interactive columns (checkbox, dropdown, date, currency, percentage) to **plain Markdown tables**,
-using a small HTML config comment placed above each table. The table on disk stays a normal
-GFM pipe table. Help the user read, create, and edit these tables while following the syntax and
-storage rules below. Never add formulas and never convert a table into a database or JSON.
+using a type row and option rows inside each table. The table on disk stays a GFM pipe table.
+Help the user read, create, and edit these tables while following the syntax and storage rules
+below. Never add formulas and never convert a table into a database or JSON.
 
-### The config comment
+### The type section
 
-A Table Fields table is a normal Markdown pipe table with a config comment above it, separated
-by one empty line (without it Obsidian does not render the table):
+Between the header's `---` delimiter row and a second `---` delimiter row, a Table Fields table has:
 
 ```markdown
-<!-- table-fields id="tasks" v="1"
-cols:
-  - {name: "Task",   type: "text"}
-  - {name: "Status", type: "select", options: ["Todo","Doing","Done"]}
-  - {name: "Due",    type: "date"}
-  - {name: "Amount", type: "currency", options: ["USD"]}
-  - {name: "Done",   type: "checkbox"}
--->
-
-| Task | Status | Due | Amount | Done |
-| ---- | ------ | --- | ------ | ---- |
-| ...  | ...    | ... | ...    | ...  |
+| Task | Status | Due  | Amount   | Done     |
+| ---- | ------ | ---- | -------- | -------- |
+| text | select | date | currency | checkbox |
+|      | Todo   |      | USD      |          |
+|      | Doing  |      |          |          |
+|      | Done   |      |          |          |
+| ---- | ------ | ---- | -------- | -------- |
+| ...  | ...    | ...  | ...      | ...      |
 ```
 
-- `id`: a short identifier, unique within the note.
-- `v`: config version, keep it `"1"`.
-- `cols`: one entry per column, **in the same order as the table columns**. Each entry is
-  `{name, type, options?}`.
-  - `name` should match the header cell text.
-  - `type` is one of: `text`, `checkbox`, `select`, `date`, `currency`, `percentage`.
-  - `options`: for `select`, the allowed values; for `currency`, a single ISO code like `["USD"]`.
+- **Type row** (first row after the header's `---`): one type per column, one of `text`,
+  `checkbox`, `select`, `date`, `currency`, `percentage`. An empty cell means `text`.
+- **Option rows** (zero or more, before the second `---`): one option per row and column. For
+  `select`, the allowed values; for `currency`, a single ISO currency code such as `USD`. Leave
+  cells empty where a column has fewer options. Write a `|` inside an option as `\|`.
+- **Data rows** follow the second `---`.
+
+Older tables may instead have an HTML comment above the table
+(`<!-- table-fields ... cols: ... -->`) listing `{name, type, options}` per column in column order;
+read it the same way.
 
 ### How values are stored (use these exact forms)
 
@@ -55,38 +53,40 @@ Values are stored in this plain, canonical form; the plugin only formats them on
 
 ### Rules
 
-1. Keep it a valid GFM pipe table: header row, a `---` delimiter row, then data rows. Every row
-   starts and ends with `|` and has the same number of cells as there are columns.
-2. The config comment must sit directly above its table with exactly one empty line between
-   them, and `cols` order must match the table's column order.
+1. Keep it a valid GFM pipe table: header row, a `---` delimiter row, the type section, then data
+   rows. Every row starts and ends with `|` and has the same number of cells as there are columns.
+2. Keep the type row directly after the first `---` row and end the option rows with a second
+   `---` row; never put data rows inside the type section.
 3. No formulas or computed cells. Percentages and currency are literal values the user maintains.
-4. For `select` cells, only use values listed in that column's `options`; if a new value is needed,
-   add it to `options` too.
+4. For `select` cells, only use values listed in that column's option rows; if a new value is
+   needed, add it as an option too (add an option row if the column has no free cell left).
 5. For `checkbox` cells, only use `[x]` or `[ ]`.
 6. For dates, always write ISO `YYYY-MM-DD` in the source (the plugin displays them localized).
-7. For currency, store the number only (e.g. `59.00`); the symbol comes from `options`.
+7. For currency, store the number only (e.g. `59.00`); the symbol comes from the column's option.
 8. Preserve the user's other columns and rows; don't reorder columns unless asked.
-9. If a note has multiple tables, give each a distinct `id`.
 
 ### Reading a table
 
-Read the config comment to learn each column's type, then interpret the cells: `[x]` means
+Read the type section to learn each column's type, then interpret the data cells: `[x]` means
 done/true, a currency number is money in that column's currency, `60%` means sixty percent, a
 `select` value is one of the allowed options. Use these meanings to summarize, filter, or answer.
 
 ### Creating or editing a table
 
-- **Create**: write the config comment, then the pipe table, using the storage forms above.
+- **Create**: write the header row, `---`, the type row, any option rows, a second `---`, then the
+  data rows, using the storage forms above.
 - **Edit a value**: change only the target cell, keeping its canonical form.
-- **Add a column**: add a `cols` entry **and** a cell to the header row, the delimiter row, and every
-  data row.
-- **Add a row**: add one pipe row with a value per column in canonical form.
-- **Change a column's type**: update its `type` in `cols` (and `options` if needed), and make sure
-  existing cell values match the new type's storage form.
+- **Add a column**: add a cell to every row - header, both `---` rows, type row, option rows and
+  data rows.
+- **Add a data row**: add one pipe row after the second `---` with a value per column in
+  canonical form.
+- **Change a column's type**: update its cell in the type row (and its options if needed), and
+  make sure existing cell values match the new type's storage form.
 
 ### Example
 
 > "Mark 'Draft PRD' as done and add a Priority column with Low/Medium/High."
 
-Set that row's Done cell to `[x]`; add `{name: "Priority", type: "select", options: ["Low","Medium","High"]}`
-to `cols`; add a `Priority` header cell, a delimiter cell, and a value such as `High` to every data row.
+Set that row's Done cell to `[x]`; add a `Priority` column whose type cell is `select` and whose
+option cells are `Low`, `Medium` and `High` (adding option rows if needed), with `---` in both
+delimiter rows and a value such as `High` in every data row.

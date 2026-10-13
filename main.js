@@ -14,14 +14,22 @@
  *     source (known limitation) — controls simply aren't shown then. That is the honest,
  *     non-surprising fallback the PRD §9 describes, not a bug.
  *
- * Config lives in an HTML comment above the table, followed by one empty line (PRD §10, Strategy A), e.g.:
+ * Config lives inside the table: a type row after the delimiter, option rows (one option
+ * per row and column), then a second delimiter before the data rows (see parseTypeRows):
+ *   | Task | Status | Due  | Amount   | Done     |
+ *   | ---- | ------ | ---- | -------- | -------- |
+ *   | text | select | date | currency | checkbox |
+ *   |      | Todo   |      | USD      |          |
+ *   |      | Doing  |      |          |          |
+ *   |      | Done   |      |          |          |
+ *   | ---- | ------ | ---- | -------- | -------- |
+ *   | PRD  | Doing  | 2026-07-22 | 1200 | [x]   |
+ *
+ * The older format, an HTML comment above the table followed by one empty line, is still read:
  *   <!-- table-fields id="tasks" v="1"
  *   cols:
  *     - {name: "Task",   type: "text"}
  *     - {name: "Status", type: "select", options: ["Todo","Doing","Done"]}
- *     - {name: "Due",    type: "date"}
- *     - {name: "Amount", type: "currency", options: ["USD"]}
- *     - {name: "Done",   type: "checkbox"}
  *   -->
  */
 
@@ -55,10 +63,9 @@ function parseConfigBlock(raw) {
 	return { id: idMatch ? idMatch[1] : null, version: vMatch ? vMatch[1] : "1", cols };
 }
 
-// Given the full document text and the table's first (header) line index,
-// find the table-fields config comment immediately above it (blank lines allowed).
-function findConfigForTable(text, headerLine) {
-	const lines = text.split("\n");
+// The table-fields config comment above a table's header line (blank lines allowed
+// between): { start, end, config } with 0-based line indices, or null.
+function findCommentAbove(lines, headerLine) {
 	let i = headerLine - 1;
 	// skip blank lines between the comment and the table
 	while (i >= 0 && lines[i].trim() === "") i--;
@@ -71,7 +78,66 @@ function findConfigForTable(text, headerLine) {
 	if (start < 0) return null;
 	const block = lines.slice(start, i + 1).join("\n");
 	const inner = block.replace(/^[\s\S]*?table-fields\b/, "").replace(/-->\s*$/, "");
-	return parseConfigBlock(inner);
+	return { start, end: i, config: parseConfigBlock(inner) };
+}
+
+const FIELD_TYPES = ["text", "checkbox", "select", "date", "currency", "percentage"];
+
+// A GFM delimiter row: every cell is dashes with optional alignment colons.
+function isDelimiterRow(line) {
+	if (!line || !line.includes("-")) return false;
+	const cells = splitRowCells(line);
+	return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
+}
+
+// Config encoded inside the table itself, between the delimiter and a second one:
+//   | Task | Status | Due  |    <- header
+//   | ---- | ------ | ---- |    <- delimiter
+//   | text | select | date |    <- type row (an empty cell means text)
+//   |      | Todo   |      |    <- option rows: one option per row and column
+//   |      | Done   |      |
+//   | ---- | ------ | ---- |    <- second delimiter; data rows follow
+// Returns { config, typeLine, endLine } (0-based, endLine = second delimiter) or null.
+function parseTypeRows(lines, headerLine, lastRowLine) {
+	const typeLine = headerLine + 2;
+	if (typeLine > lastRowLine || !isDelimiterRow(lines[headerLine + 1])) return null;
+	const types = splitRowCells(lines[typeLine]).map((c) => c.toLowerCase());
+	if (!types.some((t) => t !== "")) return null;
+	if (!types.every((t) => t === "" || FIELD_TYPES.includes(t))) return null;
+	let endLine = typeLine + 1;
+	while (endLine <= lastRowLine && !isDelimiterRow(lines[endLine])) endLine++;
+	if (endLine > lastRowLine) return null;
+	const cols = splitRowCells(lines[headerLine]).map((name, i) => ({
+		name: unescapePipes(name),
+		type: types[i] || "text",
+		options: [],
+	}));
+	for (let ln = typeLine + 1; ln < endLine; ln++) {
+		splitRowCells(lines[ln]).forEach((c, i) => {
+			if (c && cols[i]) cols[i].options.push(unescapePipes(c));
+		});
+	}
+	return { config: { id: null, version: "1", cols }, typeLine, endLine };
+}
+
+// Last row line of the table whose header is at headerLine.
+function lastTableRow(lines, headerLine) {
+	let m = headerLine;
+	while (m + 1 < lines.length && lines[m + 1].trim() !== "" && lines[m + 1].includes("|")) m++;
+	return m;
+}
+
+// Config of the table at headerLine..lastRowLine. Type rows inside the table win over a
+// comment above it. Returns { config, dataStartLine, typeLine, comment } or null:
+// typeLine is set for the type-row format, comment ({ start, end }) for the comment format.
+function resolveTable(lines, headerLine, lastRowLine) {
+	const rows = parseTypeRows(lines, headerLine, lastRowLine);
+	if (rows) return { config: rows.config, dataStartLine: rows.endLine + 1, typeLine: rows.typeLine, comment: null };
+	const comment = findCommentAbove(lines, headerLine);
+	if (comment && comment.config.cols.length > 0) {
+		return { config: comment.config, dataStartLine: headerLine + 2, typeLine: null, comment };
+	}
+	return null;
 }
 
 /* ------------------------------ cell utilities ------------------------------ */
@@ -209,18 +275,27 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 					console.log("[tf]  -> getSectionInfo returned NULL (cannot locate source lines)");
 					continue;
 				}
-				const config = findConfigForTable(info.text, info.lineStart);
+				const lines = info.text.split("\n");
+				const resolved = resolveTable(lines, info.lineStart, lastTableRow(lines, info.lineStart));
 				console.log(
 					"[tf]  -> lineStart=", info.lineStart,
-					"| headerLine=", JSON.stringify((info.text.split("\n")[info.lineStart] || "").slice(0, 40)),
-					"| config cols=", config ? config.cols.length : "none"
+					"| headerLine=", JSON.stringify((lines[info.lineStart] || "").slice(0, 40)),
+					"| config cols=", resolved ? resolved.config.cols.length : "none"
 				);
-				if (!config || config.cols.length === 0) continue; // plain table -> untouched
+				if (!resolved) continue; // plain table -> untouched
+				const config = resolved.config;
+				// Type row, option rows and second delimiter render as body rows: hide them,
+				// but keep counting them so rowIndex still maps to lineStart + 2 + rowIndex.
+				const configRows = resolved.dataStartLine - (info.lineStart + 2);
 
 				table.classList.add("tf-table");
 				const rows = Array.from(table.querySelectorAll("tbody tr"));
 				console.log("[tf]  -> enhancing", rows.length, "row(s),", config.cols.length, "col(s)");
 				rows.forEach((tr, rowIndex) => {
+					if (rowIndex < configRows) {
+						tr.classList.add("tf-config-row");
+						return;
+					}
 					const cells = Array.from(tr.children).filter((c) => c.tagName === "TD");
 					cells.forEach((td, colIndex) => {
 						const col = config.cols[colIndex];
@@ -347,32 +422,30 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		while (isTableRow(top - 1)) top--;
 		while (isTableRow(bottom + 1)) bottom++;
 
-		// bail if a config comment already sits directly above
-		let above = top - 1;
-		while (above >= 0 && editor.getLine(above).trim() === "") above--;
-		if (above >= 0 && /-->\s*$/.test(editor.getLine(above))) {
-			new Notice("Table Fields: this table already has a config comment.");
+		const delimiter = editor.getLine(top + 1) || "";
+		if (!isDelimiterRow(delimiter)) {
+			new Notice("Table Fields: the table under the cursor has no --- line below its header.");
+			return;
+		}
+		const lines = [];
+		for (let n = 0; n < editor.lineCount(); n++) lines.push(editor.getLine(n));
+		if (resolveTable(lines, top, bottom)) {
+			new Notice("Table Fields: this table already has column types.");
 			return;
 		}
 
-		const headerCells = splitRowCells(editor.getLine(top));
-		const sampleLine = top + 2 <= bottom ? editor.getLine(top + 2) : null;
-		const sampleCells = sampleLine ? splitRowCells(sampleLine) : [];
+		// Type row inferred from the first data row, then a second delimiter: the
+		// table-internal config format (see parseTypeRows).
+		const headerCells = splitRowCells(lines[top]);
+		const sampleCells = top + 2 <= bottom ? splitRowCells(lines[top + 2]) : [];
+		const types = headerCells.map((_, i) => inferType((sampleCells[i] || "").trim()));
+		const typeRow = "| " + types.join(" | ") + " |";
 
-		const cols = headerCells.map((name, i) => {
-			const sample = (sampleCells[i] || "").trim();
-			return `  - {name: "${name}", type: "${inferType(sample)}"}`;
-		});
-
-		const id = (headerCells[0] || "table").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "table";
-		const comment =
-			`<!-- table-fields id="${id}" v="1"\n` +
-			`cols:\n` +
-			cols.join("\n") +
-			`\n-->\n\n`; // empty line before the table, or Obsidian does not render it as a table
-
-		editor.replaceRange(comment, { line: top, ch: 0 });
-		new Notice(`Table Fields: marked "${id}" (${headerCells.length} columns). Edit the comment to set column types.`);
+		editor.replaceRange("\n" + typeRow + "\n" + delimiter, { line: top + 1, ch: delimiter.length });
+		new Notice(
+			`Table Fields: marked table (${headerCells.length} columns). Edit the type row; ` +
+			`put options in rows above the second --- line.`
+		);
 	}
 };
 
@@ -401,29 +474,27 @@ function inferType(sample) {
  * Only active in Live Preview (editorLivePreviewField); Source mode stays raw.
  * ==========================================================================*/
 
-// Scan the whole document for smart tables. Returns, per table, the config plus
-// the 0-based line indices of the comment start, header, and last data row.
+// Scan the whole document for smart tables (type rows or a config comment), skipping
+// fenced code blocks. Returns, per table, resolveTable()'s result plus the 0-based
+// header and last row line indices.
 function findSmartTables(text) {
 	const lines = text.split("\n");
 	const out = [];
+	let fence = null;
 	for (let i = 0; i < lines.length; i++) {
-		if (!/<!--\s*table-fields\b/.test(lines[i])) continue;
-		let j = i;
-		while (j < lines.length && !/-->/.test(lines[j])) j++;
-		if (j >= lines.length) continue; // unterminated comment
-		let k = j + 1;
-		while (k < lines.length && lines[k].trim() === "") k++;
-		if (k >= lines.length || !lines[k].includes("|")) continue; // no table below
-		const headerLine = k;
-		let m = k;
-		while (m + 1 < lines.length && lines[m + 1].trim() !== "" && lines[m + 1].includes("|")) m++;
-		const block = lines.slice(i, j + 1).join("\n");
-		const inner = block.replace(/^[\s\S]*?table-fields\b/, "").replace(/-->[\s\S]*$/, "");
-		const config = parseConfigBlock(inner);
-		if (config.cols.length > 0) {
-			out.push({ configStartLine: i, commentEndLine: j, headerLine, lastRowLine: m, config });
+		const fm = lines[i].match(/^\s*(`{3,}|~{3,})/);
+		if (fm) {
+			if (fence === null) fence = fm[1][0];
+			else if (fm[1][0] === fence) fence = null;
+			continue;
 		}
-		i = m; // continue scanning after this table
+		if (fence !== null) continue;
+		if (!lines[i].includes("|") || !isDelimiterRow(lines[i + 1])) continue;
+		if (i > 0 && lines[i - 1].trim() !== "" && lines[i - 1].includes("|")) continue; // not a header
+		const lastRowLine = lastTableRow(lines, i);
+		const resolved = resolveTable(lines, i, lastRowLine);
+		if (resolved) out.push(Object.assign({ headerLine: i, lastRowLine }, resolved));
+		i = lastRowLine; // continue scanning after this table
 	}
 	return out;
 }
@@ -591,7 +662,7 @@ class SmartTableWidget extends WidgetType {
 	destroy(dom) {
 		if (dom.tfComponent) dom.tfComponent.unload();
 	}
-	// Right-click a header -> pick the column's type (rewrites the config comment).
+	// Right-click a header -> pick the column's type (rewrites the type cell or the comment).
 	showColumnMenu(view, colIndex, col, evt) {
 		const menu = new Menu();
 		menu.addItem((i) => i.setTitle("Column: " + col.name).setDisabled(true));
@@ -603,6 +674,11 @@ class SmartTableWidget extends WidgetType {
 					.setTitle(ty)
 					.setChecked(col.type === ty)
 					.onClick(() => {
+						if (this.data.typeCells) {
+							const cell = this.data.typeCells[colIndex];
+							if (cell) dispatchCell(view, cell, ty);
+							return;
+						}
 						const cols = this.data.config.cols.map((c, i) =>
 							i === colIndex ? Object.assign({}, c, { type: ty }) : c
 						);
@@ -632,7 +708,7 @@ function buildSmartTableDecorations(state) {
 		const sel = state.selection.main;
 		const builder = new RangeSetBuilder();
 		for (const t of tables) {
-			// Replace the table only; the config comment above stays visible and editable.
+			// Replace the table, type rows included; a config comment above stays visible.
 			const fromLine = state.doc.line(t.headerLine + 1);
 			const toLine = state.doc.line(t.lastRowLine + 1);
 			const from = fromLine.from;
@@ -641,7 +717,7 @@ function buildSmartTableDecorations(state) {
 
 			const rows = [];
 			const sigParts = [];
-			for (let ln = t.headerLine + 2; ln <= t.lastRowLine; ln++) {
+			for (let ln = t.dataStartLine; ln <= t.lastRowLine; ln++) {
 				const line = state.doc.line(ln + 1);
 				const cells = getCellRanges(line.text, line.from);
 				rows.push({ cells });
@@ -649,11 +725,16 @@ function buildSmartTableDecorations(state) {
 			}
 			const signature =
 				from + ":" + to + ":" + t.config.cols.map((c) => c.name + "/" + c.type + "/" + (c.options || []).join(".")).join(",") + ":" + sigParts.join("//");
-			const configRange = {
-				from: state.doc.line(t.configStartLine + 1).from,
-				to: state.doc.line(t.commentEndLine + 1).to,
-			};
-			const widget = new SmartTableWidget({ config: t.config, rows, signature, configRange });
+			// Where a column type change is written: the comment, or the type row's cells.
+			const configRange = t.comment
+				? { from: state.doc.line(t.comment.start + 1).from, to: state.doc.line(t.comment.end + 1).to }
+				: null;
+			let typeCells = null;
+			if (t.typeLine !== null) {
+				const typeRow = state.doc.line(t.typeLine + 1);
+				typeCells = getCellRanges(typeRow.text, typeRow.from);
+			}
+			const widget = new SmartTableWidget({ config: t.config, rows, signature, configRange, typeCells });
 			builder.add(from, to, Decoration.replace({ widget, block: true }));
 		}
 		return builder.finish();
@@ -705,23 +786,25 @@ function buildUsageMd(img) {
 	"",
 	"## Set up a table",
 	"",
-	"Put a small config comment above a normal pipe table, with one empty line in between:",
+	"Below the header's --- line, add a row with each column's type, then one row per dropdown",
+	"option (or currency code), then a second --- line. Your data rows follow:",
 	"",
-	"    <!-- table-fields id=\"tasks\" v=\"1\"",
-	"    cols:",
-	"      - {name: \"Task\",   type: \"text\"}",
-	"      - {name: \"Status\", type: \"select\", options: [\"Todo\",\"Doing\",\"Done\"]}",
-	"      - {name: \"Due\",    type: \"date\"}",
-	"      - {name: \"Done\",   type: \"checkbox\"}",
-	"    -->",
+	"    | Task      | Status | Due        | Done     |",
+	"    | --------- | ------ | ---------- | -------- |",
+	"    | text      | select | date       | checkbox |",
+	"    |           | Todo   |            |          |",
+	"    |           | Doing  |            |          |",
+	"    |           | Done   |            |          |",
+	"    | --------- | ------ | ---------- | -------- |",
+	"    | Draft PRD | Doing  | 2026-07-22 | [x]      |",
 	"",
-	"    | Task      | Status | Due        | Done |",
-	"    | --------- | ------ | ---------- | ---- |",
-	"    | Draft PRD | Doing  | 2026-07-22 | [x]  |",
+	"An empty type cell means text. The plugin hides the type and option rows when it shows the table.",
 	"",
 	"Or: put your cursor in any normal table and run the command **Table Fields: Mark table under",
-	"cursor as Table Fields** — it sets up the columns from your data. Then right-click a header to",
+	"cursor as Table Fields** — it adds the type row from your data. Then right-click a header to",
 	"change a type.",
+	"",
+	"Tables set up with the older config comment above the table keep working.",
 	"",
 	"![Right-click a column header to choose its field type.](" + img("02-field-type-menu.png") + ")",
 	"",
@@ -740,7 +823,8 @@ function buildUsageMd(img) {
 	"",
 	"- Your values stay plain, readable text; the pretty formatting is only on screen.",
 	"- There are no formulas — this is on purpose.",
-	"- Turn the plugin off and every table is still clean Markdown.",
+	"- Turn the plugin off and every table is still plain Markdown; the type and option rows then",
+	"  show as ordinary rows.",
 	"",
 	"![With the plugin off, the note is still a clean Markdown table.](" + img("04-markdown-fallback.png") + ")",
 	].join("\n");
@@ -749,33 +833,30 @@ function buildUsageMd(img) {
 const SKILL_TEXT = [
 	"You are assisting a user who uses the Table Fields plugin for Obsidian. Table Fields adds typed,",
 	"interactive columns (checkbox, dropdown, date, currency, percentage) to PLAIN Markdown tables,",
-	"using a small HTML config comment placed above each table. The table on disk stays a",
-	"normal GFM pipe table. Help the user read, create, and edit these tables while following the",
-	"syntax and storage rules below. Never add formulas and never convert a table into a database or JSON.",
+	"using a type row and option rows inside each table. The table on disk stays a GFM pipe table.",
+	"Help the user read, create, and edit these tables while following the syntax and storage rules",
+	"below. Never add formulas and never convert a table into a database or JSON.",
 	"",
-	"THE CONFIG COMMENT",
-	"A Table Fields table is a normal Markdown pipe table with a config comment above it, separated",
-	"by one empty line (without it Obsidian does not render the table):",
+	"THE TYPE SECTION",
+	"Between the header's --- delimiter row and a second --- delimiter row, a Table Fields table has:",
 	"",
-	"    <!-- table-fields id=\"tasks\" v=\"1\"",
-	"    cols:",
-	"      - {name: \"Task\",   type: \"text\"}",
-	"      - {name: \"Status\", type: \"select\", options: [\"Todo\",\"Doing\",\"Done\"]}",
-	"      - {name: \"Due\",    type: \"date\"}",
-	"      - {name: \"Amount\", type: \"currency\", options: [\"USD\"]}",
-	"      - {name: \"Done\",   type: \"checkbox\"}",
-	"    -->",
+	"    | Task | Status | Due  | Amount   | Done     |",
+	"    | ---- | ------ | ---- | -------- | -------- |",
+	"    | text | select | date | currency | checkbox |",
+	"    |      | Todo   |      | USD      |          |",
+	"    |      | Doing  |      |          |          |",
+	"    |      | Done   |      |          |          |",
+	"    | ---- | ------ | ---- | -------- | -------- |",
+	"    | ...  | ...    | ...  | ...      | ...      |",
 	"",
-	"    | Task | Status | Due | Amount | Done |",
-	"    | ---- | ------ | --- | ------ | ---- |",
-	"    | ...  | ...    | ... | ...    | ...  |",
-	"",
-	"- id: a short identifier, unique within the note.",
-	"- v: config version, keep it \"1\".",
-	"- cols: one entry per column, IN THE SAME ORDER as the table columns. Each entry is {name, type, options?}.",
-	"  - name should match the header cell text.",
-	"  - type is one of: text, checkbox, select, date, currency, percentage.",
-	"  - options: for select, the list of allowed values; for currency, a single ISO currency code such as [\"USD\"].",
+	"- Type row (first row after the header's ---): one type per column, one of: text, checkbox,",
+	"  select, date, currency, percentage. An empty cell means text.",
+	"- Option rows (zero or more, before the second ---): one option per row and column. For select,",
+	"  the allowed values; for currency, a single ISO currency code such as USD. Leave cells empty",
+	"  where a column has fewer options. Write a | inside an option as \\|.",
+	"- Data rows follow the second ---.",
+	"Older tables may instead have an HTML comment above the table (<!-- table-fields ... cols: ... -->)",
+	"listing {name, type, options} per column in column order; read it the same way.",
 	"",
 	"HOW VALUES ARE STORED (use these exact forms when writing cells)",
 	"- text: plain text. Example: Draft PRD",
@@ -787,37 +868,37 @@ const SKILL_TEXT = [
 	"Values are stored in this plain, canonical form; the plugin only formats them on screen.",
 	"",
 	"RULES",
-	"1. Keep it a valid GFM pipe table: a header row, a --- delimiter row, then data rows. Every row",
-	"   starts and ends with a pipe and has the same number of cells as there are columns.",
-	"2. The config comment must sit directly above its table with exactly one empty line between",
-	"   them, and cols order must match the table's column order.",
+	"1. Keep it a valid GFM pipe table: a header row, a --- delimiter row, the type section, then data",
+	"   rows. Every row starts and ends with a pipe and has the same number of cells as there are columns.",
+	"2. Keep the type row directly after the first --- row and end the option rows with a second ---",
+	"   row; never put data rows inside the type section.",
 	"3. Do not invent formulas or computed cells. Percentages and currency are literal values.",
-	"4. For select cells, only use values listed in that column's options. If a new value is needed,",
-	"   add it to options as well.",
+	"4. For select cells, only use values listed in that column's option rows. If a new value is",
+	"   needed, add it as an option too (add an option row if the column has no free cell left).",
 	"5. For checkbox cells, only use [x] or [ ].",
 	"6. For dates, always write ISO YYYY-MM-DD in the source (the plugin displays them localized).",
-	"7. For currency, store the number only (e.g. 59.00); the symbol comes from options.",
+	"7. For currency, store the number only (e.g. 59.00); the symbol comes from the column's option.",
 	"8. Preserve the user's other columns and rows; do not reorder columns unless asked.",
-	"9. If a note has multiple tables, give each a distinct id.",
 	"",
 	"READING A TABLE",
-	"Read the config comment to learn each column's type, then interpret the cells: [x] means",
+	"Read the type section to learn each column's type, then interpret the data cells: [x] means",
 	"done/true, a currency number is money in that column's currency, 60% means sixty percent, a",
 	"select value is one of the allowed options. Use these meanings to summarize, filter, or answer.",
 	"",
 	"CREATING OR EDITING A TABLE",
-	"- Create: write the config comment, then the pipe table, using the storage forms above.",
+	"- Create: write the header row, ---, the type row, any option rows, a second ---, then the data",
+	"  rows, using the storage forms above.",
 	"- Edit a value: change only the target cell, keeping its canonical form.",
-	"- Add a column: add a cols entry AND add a cell to the header row, the delimiter row, and every data row.",
-	"- Add a row: add one pipe row with a value per column in canonical form.",
-	"- Change a column's type: update its type in cols (and options if needed), and make sure existing",
-	"  cell values match the new type's storage form.",
+	"- Add a column: add a cell to every row - header, both --- rows, type row, option rows and data rows.",
+	"- Add a data row: add one pipe row after the second --- with a value per column in canonical form.",
+	"- Change a column's type: update its cell in the type row (and its options if needed), and make",
+	"  sure existing cell values match the new type's storage form.",
 	"",
 	"EXAMPLE",
 	"User: \"Mark 'Draft PRD' as done and add a Priority column with Low/Medium/High.\"",
-	"You: set that row's Done cell to [x]; add {name: \"Priority\", type: \"select\", options:",
-	"[\"Low\",\"Medium\",\"High\"]} to cols; add a Priority header cell, a delimiter cell, and a value such",
-	"as High to every data row.",
+	"You: set that row's Done cell to [x]; add a Priority column whose type cell is select and whose",
+	"option cells are Low, Medium and High (adding option rows if needed), with --- in both delimiter",
+	"rows and a value such as High in every data row.",
 ].join("\n");
 
 async function renderMarkdownInto(app, md, el, component, sourcePath = "") {

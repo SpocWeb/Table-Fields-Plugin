@@ -23,28 +23,27 @@ file, no lock-in.
 - 👀 **Works while you read *and* while you edit** — the controls show up in both modes.
 - 🧹 **Nothing locked in** — it's always a plain Markdown table on disk.
 
-## A tiny comment gives each column its field type
+## A type row gives each column its field type
 
-You write (or generate) a small note like this. Leave one empty line between the comment and the
-table, otherwise Obsidian does not render the table:
+Below the header's `---` line you write a row with each column's type, one row per dropdown
+option, and a second `---` line. The data rows follow:
 
 ```markdown
-<!-- table-fields id="tasks" v="1"
-cols:
-  - {name: "Task",   type: "text"}
-  - {name: "Status", type: "select", options: ["Todo","Doing","Done"]}
-  - {name: "Due",    type: "date"}
-  - {name: "Done",   type: "checkbox"}
--->
-
-| Task           | Status | Due        | Done |
-| -------------- | ------ | ---------- | ---- |
-| Draft PRD      | Doing  | 2026-07-22 | [x]  |
-| Review designs | Todo   | 2026-07-24 | [ ]  |
+| Task           | Status | Due        | Done     |
+| -------------- | ------ | ---------- | -------- |
+| text           | select | date       | checkbox |
+|                | Todo   |            |          |
+|                | Doing  |            |          |
+|                | Done   |            |          |
+| -------------- | ------ | ---------- | -------- |
+| Draft PRD      | Doing  | 2026-07-22 | [x]      |
+| Review designs | Todo   | 2026-07-24 | [ ]      |
 ```
 
 …and in your note it becomes a table where **Status** is a dropdown, **Due** shows a tidy date, and
 **Done** is a real checkbox you can click. Tick it, and the change is saved straight into the table.
+The plugin hides the type and option rows; without the plugin they show as ordinary rows.
+Tables set up with the older `<!-- table-fields ... -->` comment above the table keep working.
 
 ![Right-click a column header to choose its Table Fields type.](assets/readme/02-field-type-menu.png)
 
