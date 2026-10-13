@@ -669,6 +669,27 @@ function renderWidgetCell(td, col, cell, view, md) {
 	}
 }
 
+// Attribute on a widget cell holding the document offset its click moves the cursor to.
+const SOURCE_POS_ATTR = "data-tf-pos";
+
+// Where a click on a cell puts the cursor: at its text, after the padding space.
+function cellSourcePos(cell) {
+	const lead = (cell.text || "").length - (cell.text || "").trimStart().length;
+	return Math.min(cell.from + lead, cell.to);
+}
+
+// The document offset a mousedown in the widget should move the cursor to, or null for a
+// click that is not a left click or that lands on a checkbox, dropdown, link or button.
+function sourcePosOfClick(evt) {
+	if (evt.button !== 0) return null;
+	const target = evt.target;
+	if (!target || !target.closest || target.closest("input, select, a, button")) return null;
+	const cell = target.closest("[" + SOURCE_POS_ATTR + "]");
+	if (!cell) return null;
+	const pos = Number(cell.getAttribute(SOURCE_POS_ATTR));
+	return Number.isFinite(pos) ? pos : null;
+}
+
 // The block widget that renders a whole smart table interactively in Live Preview.
 class SmartTableWidget extends WidgetType {
 	constructor(data) {
@@ -701,15 +722,26 @@ class SmartTableWidget extends WidgetType {
 				if (target) app.workspace.openLinkText(target, md.sourcePath, Keymap.isModEvent(evt));
 			});
 		}
+		// A left click on a cell (not on a control or link) puts the cursor into that cell's
+		// source: the widget steps aside and Obsidian's own table editor takes over.
+		wrap.addEventListener("mousedown", (evt) => {
+			const pos = sourcePosOfClick(evt);
+			if (pos === null) return;
+			evt.preventDefault();
+			view.dispatch({ selection: { anchor: pos } });
+			view.focus();
+		});
 		const table = activeDocument.createElement("table");
 		table.className = "tf-table tf-lp-table";
 
 		const thead = activeDocument.createElement("thead");
 		const htr = activeDocument.createElement("tr");
+		const headerCells = this.data.headerCells || [];
 		this.data.config.cols.forEach((col, colIndex) => {
 			const th = activeDocument.createElement("th");
 			th.textContent = col.name;
 			th.classList.add("tf-th");
+			if (headerCells[colIndex]) th.setAttribute(SOURCE_POS_ATTR, String(cellSourcePos(headerCells[colIndex])));
 			th.setAttr("title", "Right-click to set column type");
 			th.addEventListener("contextmenu", (evt) => {
 				evt.preventDefault();
@@ -726,6 +758,7 @@ class SmartTableWidget extends WidgetType {
 			row.cells.forEach((cell, colIndex) => {
 				const col = this.data.config.cols[colIndex];
 				const td = activeDocument.createElement("td");
+				td.setAttribute(SOURCE_POS_ATTR, String(cellSourcePos(cell)));
 				if (col) renderWidgetCell(td, col, cell, view, md);
 				else renderCellMarkdown(td, unescapePipes((cell.text || "").trim()), md);
 				tr.appendChild(td);
@@ -815,7 +848,8 @@ function buildSmartTableDecorations(state) {
 				typeCells = getCellRanges(typeRow.text, typeRow.from);
 			}
 			const typeMark = t.marked ? CONFIG_MARK : "";
-			const widget = new SmartTableWidget({ config: t.config, rows, signature, configRange, typeCells, typeMark });
+			const headerCells = getCellRanges(fromLine.text, fromLine.from);
+			const widget = new SmartTableWidget({ config: t.config, rows, signature, configRange, typeCells, typeMark, headerCells });
 			builder.add(from, to, Decoration.replace({ widget, block: true }));
 		}
 		return builder.finish();
