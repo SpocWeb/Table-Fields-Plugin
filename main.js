@@ -732,7 +732,6 @@ class SmartTableWidget extends WidgetType {
 		// is repeated on the same cell of Obsidian's table so its cell editor opens there.
 		wrap.addEventListener("mousedown", (evt) => {
 			const pos = sourcePosOfClick(evt);
-			console.log("[tf] widget mousedown: button", evt.button, "on", evt.target && evt.target.tagName, "-> cursor to", pos);
 			if (pos === null) return;
 			evt.preventDefault();
 			const cellEl = evt.target.closest("[" + SOURCE_POS_ATTR + "]");
@@ -741,8 +740,9 @@ class SmartTableWidget extends WidgetType {
 			const range = { from: this.data.from, to: this.data.to, since: Date.now() };
 			view.dispatch({ effects: editTable.of(range), selection: { anchor: pos } });
 			requestAnimationFrame(() => {
-				const ok = clickNativeCell(view, range, nativeRow, nativeCol);
-				console.log("[tf]  -> repeated click on Obsidian's table, row", nativeRow, "col", nativeCol, ok ? "done" : "FAILED: cell not found");
+				if (!clickNativeCell(view, range, nativeRow, nativeCol)) {
+					console.warn("[tf] click to edit: cell", nativeRow, nativeCol, "not found in Obsidian's table");
+				}
 			});
 		});
 		const table = activeDocument.createElement("table");
@@ -963,7 +963,7 @@ function clickNativeCell(view, range, row, col) {
 		clientX: box.left + Math.min(8, box.width / 2), clientY: box.top + box.height / 2,
 		pointerId: 1, pointerType: "mouse", isPrimary: true,
 	};
-	console.log("[tf]  -> Obsidian's cell:", cell.outerHTML.slice(0, 400));
+	// Obsidian opens its cell editor on pointer events, so send those along with mouse events.
 	target.dispatchEvent(new win.PointerEvent("pointerdown", init));
 	target.dispatchEvent(new win.MouseEvent("mousedown", init));
 	target.dispatchEvent(new win.PointerEvent("pointerup", Object.assign({}, init, { buttons: 0 })));
@@ -980,9 +980,6 @@ function clickNativeCell(view, range, row, col) {
 				sel.collapseToEnd();
 			}
 		}
-		const active = cell.ownerDocument.activeElement;
-		console.log("[tf]  -> after the repeated click: cell editor", editable ? "found" : "not found",
-			"| focus in cell:", !!(active && cell.contains(active)), "| focus on", active && (active.className || active.tagName));
 	}, 60);
 	return true;
 }
@@ -1010,7 +1007,6 @@ const resumeTablePlugin = ViewPlugin.fromClass(
 			const focusInTable = !!(native && active && native.contains(active));
 			const head = this.view.state.selection.main.head;
 			if (shouldResumeTable(edited, head, Date.now(), focusInTable)) {
-				console.log("[tf] left the edited table -> widget back");
 				this.view.dispatch({ effects: editTable.of(null) });
 			} else if (Date.now() - edited.since < 500) {
 				this.schedule();
