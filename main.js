@@ -955,13 +955,35 @@ function clickNativeCell(view, range, row, col) {
 	const tr = row < 0 ? table.tHead && table.tHead.rows[0] : table.tBodies[0] && table.tBodies[0].rows[row];
 	const cell = tr && tr.cells[col];
 	if (!cell) return false;
-	const target = cell.querySelector(".table-cell-wrapper, .cm-editor, .cm-content") || cell;
+	const target = cell.querySelector(".table-cell-wrapper") || cell;
 	const box = target.getBoundingClientRect();
+	const win = cell.ownerDocument.defaultView;
 	const init = {
-		bubbles: true, cancelable: true, button: 0, buttons: 1,
+		bubbles: true, cancelable: true, composed: true, view: win, detail: 1, button: 0, buttons: 1,
 		clientX: box.left + Math.min(8, box.width / 2), clientY: box.top + box.height / 2,
+		pointerId: 1, pointerType: "mouse", isPrimary: true,
 	};
-	for (const type of ["mousedown", "mouseup", "click"]) target.dispatchEvent(new MouseEvent(type, init));
+	console.log("[tf]  -> Obsidian's cell:", cell.outerHTML.slice(0, 400));
+	target.dispatchEvent(new win.PointerEvent("pointerdown", init));
+	target.dispatchEvent(new win.MouseEvent("mousedown", init));
+	target.dispatchEvent(new win.PointerEvent("pointerup", Object.assign({}, init, { buttons: 0 })));
+	target.dispatchEvent(new win.MouseEvent("mouseup", Object.assign({}, init, { buttons: 0 })));
+	target.dispatchEvent(new win.MouseEvent("click", Object.assign({}, init, { buttons: 0 })));
+	// If a cell editor opened but did not take the focus, give it the focus at its end.
+	setTimeout(() => {
+		const editable = cell.querySelector("[contenteditable='true']");
+		if (editable && !editable.contains(cell.ownerDocument.activeElement)) {
+			editable.focus();
+			const sel = win.getSelection();
+			if (sel) {
+				sel.selectAllChildren(editable);
+				sel.collapseToEnd();
+			}
+		}
+		const active = cell.ownerDocument.activeElement;
+		console.log("[tf]  -> after the repeated click: cell editor", editable ? "found" : "not found",
+			"| focus in cell:", !!(active && cell.contains(active)), "| focus on", active && (active.className || active.tagName));
+	}, 60);
 	return true;
 }
 
