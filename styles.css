@@ -125,17 +125,12 @@
 	cursor: context-menu;
 }
 
-/* Markdown-rendered text cells: no block margins, so rows are as high as a native table's */
-.tf-lp-table td.tf-cell-md p,
-.tf-lp-table td.tf-cell-md ol,
-.tf-lp-table td.tf-cell-md ul,
-.tf-lp-table td.tf-cell-md blockquote,
-.tf-lp-table td.tf-cell-md > div {
-	margin-top: 0;
-	margin-bottom: 0;
+/* Markdown-rendered text cells: no paragraph margins, like a native table cell */
+.tf-lp-table td.tf-cell-md > p {
+	margin: 0;
 }
 
-/* Reading view: type and option rows are config, not data */
+/* Reading view: type row, option rows and second delimiter are config, not data */
 .tf-table tr.tf-config-row {
 	display: none;
 }

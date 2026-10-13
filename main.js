@@ -616,17 +616,7 @@ function renderCellMarkdown(td, text, md) {
 		return;
 	}
 	td.classList.add("tf-cell-md");
-	renderMarkdownInto(md.app, inlineMarkdown(text), td, md.component, md.sourcePath);
-}
-
-// A table cell holds inline Markdown only, so `1. Tap` is text, not a list. Escape what
-// would start a block (list, heading, quote) when the cell is rendered on its own.
-function inlineMarkdown(text) {
-	return text
-		.replace(/^(\s*)(\d+)([.)])(\s)/, "$1$2\\$3$4")
-		.replace(/^(\s*)([-+*])(\s)/, "$1\\$2$3")
-		.replace(/^(\s*)(#{1,6})(\s)/, "$1\\$2$3")
-		.replace(/^(\s*)>/, "$1\\>");
+	renderMarkdownInto(md.app, text, td, md.component, md.sourcePath);
 }
 
 // Render a single interactive/formatted cell into `td` for the Live Preview widget.
