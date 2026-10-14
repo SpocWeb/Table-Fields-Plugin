@@ -842,10 +842,13 @@ class SmartTableWidget extends WidgetType {
 	destroy(dom) {
 		if (dom.tfComponent) dom.tfComponent.unload();
 	}
-	// Right-click a header -> pick the column's type (rewrites the type cell or the comment),
-	// or sort the rows by the column.
+	// Right-click a header -> sort the rows by the column, or pick the column's type (rewrites
+	// the type cell or the comment).
 	showColumnMenu(view, colIndex, col, evt) {
 		const menu = new Menu();
+		menu.addItem((item) => item.setTitle("Sort ascending").setIcon("arrow-up-narrow-wide").onClick(() => this.sortRows(view, colIndex, false)));
+		menu.addItem((item) => item.setTitle("Sort descending").setIcon("arrow-down-wide-narrow").onClick(() => this.sortRows(view, colIndex, true)));
+		menu.addSeparator();
 		menu.addItem((i) => i.setTitle("Column: " + col.name).setDisabled(true));
 		menu.addSeparator();
 		const types = ["text", "box", "select", "date", "currency", "percentage"];
@@ -871,9 +874,6 @@ class SmartTableWidget extends WidgetType {
 					});
 			});
 		}
-		menu.addSeparator();
-		menu.addItem((item) => item.setTitle("Sort ascending").setIcon("arrow-up-narrow-wide").onClick(() => this.sortRows(view, colIndex, false)));
-		menu.addItem((item) => item.setTitle("Sort descending").setIcon("arrow-down-wide-narrow").onClick(() => this.sortRows(view, colIndex, true)));
 		menu.showAtMouseEvent(evt);
 	}
 
