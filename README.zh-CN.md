@@ -20,9 +20,32 @@ Table Fields 给每一**列一个含义**。告诉它"这列是复选框""这列
 - 👀 **阅读时和编辑时都能用**——两种模式下控件都在。
 - 🧹 **绝不绑架**——磁盘上永远是一张纯 Markdown 表格。
 
-## 一小段注释就能给每列声明字段类型
+## 用类型行或一段注释给每列声明字段类型
 
-你写（或让它生成）这样一小段笔记。注释和表格之间要空一行，否则 Obsidian 不会把它渲染成表格：
+有两种写法可以描述各列，效果相同，插件两种都能读。
+
+### 写法一：表格里的 `__` 类型行
+
+在表头的 `---` 行下面，写一行各列的类型，再为每个下拉选项写一行。这些行的单元格要么以 `__` 开头，
+要么留空，插件靠这一点认出它们，即使你按某一列排序过表格也一样。后面接数据行：
+
+```markdown
+| Task           | Status   | Due        | Done  |
+| -------------- | -------- | ---------- | ----- |
+| __text         | __select | __date     | __    |
+|                | __Todo   |            |       |
+|                | __Doing  |            |       |
+|                | __Done   |            |       |
+| Draft PRD      | Doing    | 2026-07-22 | [x]   |
+| Review designs | Todo     | 2026-07-24 | [ ]   |
+```
+
+插件会隐藏类型行和选项行；没有插件时，它们显示为普通的表格行。你标记表格或修改列类型时，插件写入的
+就是这种格式。
+
+### 写法二：表格上方的 HTML 注释
+
+你写（或让它生成）这样一小段注释。注释和表格之间要空一行，否则 Obsidian 不会把它渲染成表格：
 
 ```markdown
 <!-- table-fields id="tasks" v="1"
@@ -30,7 +53,7 @@ cols:
   - {name: "Task",   type: "text"}
   - {name: "Status", type: "select", options: ["Todo","Doing","Done"]}
   - {name: "Due",    type: "date"}
-  - {name: "Done",   type: "checkbox"}
+  - {name: "Done",   type: "box"}
 -->
 
 | Task           | Status | Due        | Done |
@@ -39,16 +62,24 @@ cols:
 | Review designs | Todo   | 2026-07-24 | [ ]  |
 ```
 
-……在笔记里它就变成一张表：**Status** 是下拉，**Due** 显示成整洁的日期，**Done** 是一个能点的真复选框。
-点一下，改动就直接存回表格里。
+注释在阅读视图里不可见，表格本身也不会多出额外的行。
+
+无论哪种写法，在笔记里它都会变成一张表：**Status** 是下拉，**Due** 显示成整洁的日期，**Done** 是一个
+能点的真复选框。点一下，改动就直接存回表格里。
+
+### 复选框列有几种写法
+
+复选框列可以写成 `box` 或 `checkbox`，两者含义相同。在类型行里，单独一个 `__` 是 `__box` 的简写，
+所以 `__`、`__box` 和 `__checkbox` 是等价的。类型行里的空单元格表示 `text`。
 
 ![右键列头即可选择这一列的 Table Fields 类型。](assets/readme/02-field-type-menu.png)
 
 ## 下拉选项在 Source mode 里直接改
 
-切到 **Source mode**，找到 `type: "select"` 的那一列，编辑它的 `options` 列表——例如
-`options: ["Low","Medium","High"]`。改完切回阅读视图或 Live Preview，下拉列表就会使用这些选项。
-小提示：如果新选项没有立刻出现，退出这篇 note 再重新打开一次，让渲染刷新。
+切到 **Source mode**，编辑 `select` 列的选项。用类型行时，每个选项是该列选项行里一个以 `__` 开头的
+单元格，例如 `__Low`、`__Medium`、`__High`；选项比行多时，再加一行选项行。用注释时，编辑该列的
+`options` 列表，例如 `options: ["Low","Medium","High"]`。改完切回阅读视图或 Live Preview，下拉列表
+就会使用新选项。小提示：如果新选项没有立刻出现，退出这篇 note 再重新打开一次，让渲染刷新。
 
 ![在 Source mode 里修改 select 列的 options 列表即可编辑下拉选项。](assets/readme/05-edit-dropdown-options.png)
 
@@ -71,7 +102,7 @@ cols:
 1. 写一张普通的 Markdown 表格。
 2. 把光标放进去，运行命令 **"Table Fields: Mark table under cursor as Table Fields"**——它会看你的
    数据、自动把各列配好。
-3. 想改某一列？**右键它的表头**，选类型（文本、复选框、下拉、日期、金额、百分比）。
+3. 想改某一列？**右键它的表头**，选类型（文本、复选框（box）、下拉、日期、金额、百分比）。
 
 就这样。点你的复选框和下拉，改动会自动存回笔记。
 
