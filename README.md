@@ -30,17 +30,22 @@ either one.
 
 ### Option 1: `__` type rows inside the table
 
-Below the header's `---` line you write a row with each column's type and one row per dropdown
-option. Their cells start with `__` or stay empty, which is how the plugin finds them, even after
-you sort the table by a column. The data rows follow:
+Below the header's `---` line you write a row with each column's type 
+and one row per dropdown option. 
+These cells need to start with `__`, 
+which is how the plugin finds them, even after you sort the table by a column.
+An option cell without an option holds a single `-`. 
+When you sort ascending, the `__` cells come first and the `-` cells next, 
+so the type row stays at the top and the option rows right below it. 
+The data rows follow:
 
 ```markdown
 | Task           | Status   | Due        | Done  |
 | -------------- | -------- | ---------- | ----- |
 | __text         | __select | __date     | __    |
-|                | __Todo   |            |       |
-|                | __Doing  |            |       |
-|                | __Done   |            |       |
+| -              | __Todo   | -          | -     |
+| -              | __Doing  | -          | -     |
+| -              | __Done   | -          | -     |
 | Draft PRD      | Doing    | 2026-07-22 | [x]   |
 | Review designs | Todo     | 2026-07-24 | [ ]   |
 ```
@@ -86,7 +91,8 @@ in the type row means `text`.
 
 Switch the note to **Source mode** and edit the choices of the `select` column. With type rows, each
 choice is a `__`-prefixed cell in that column's option rows, for example `__Low`, `__Medium`,
-`__High`; add an option row if the column needs more choices than there are rows. With a comment,
+`__High`; add an option row if the column needs more choices than there are rows, with `-` in the
+other columns. Tables written with empty option cells keep working. With a comment,
 edit the column's `options` list, for example `options: ["Low","Medium","High"]`. When you switch
 back to Reading view or Live Preview, the dropdown uses the new choices. Tip: if they do not appear
 immediately, leave the note and open it again to refresh the rendered dropdown.

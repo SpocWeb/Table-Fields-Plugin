@@ -230,6 +230,53 @@ test("config rows (only __ or empty cells) are found anywhere in the table", () 
 	]);
 });
 
+// The __ format with - in the option cells without an option.
+const DASHED = [
+	"| Task   | Status   | Due        | Done  |", // 0
+	"| ----   | ------   | ----       | ----  |", // 1
+	"| __text | __select | __date     | __    |", // 2 type row
+	"| -      | __Todo   | -          | -     |", // 3 option row
+	"| -      | __Doing  | -          | -     |", // 4 option row
+	"| Ship   | Todo     | 2026-10-20 | [ ]   |", // 5
+	"| PRD    | Doing    | 2026-10-13 | [x]   |", // 6
+	"| -      | Doing    | -          | [ ]   |", // 7 data: Doing has no __
+];
+
+test("a - in an option row means no option", () => {
+	const parsed = parseTypeRows(DASHED, 0, DASHED.length - 1);
+	assert.strictEqual(parsed.typeLine, 2);
+	assert.deepStrictEqual(Array.from(parsed.configLines), [2, 3, 4]);
+	assert.deepStrictEqual(plain(parsed.config.cols), [
+		{ name: "Task", type: "text", options: [] },
+		{ name: "Status", type: "select", options: ["Todo", "Doing"] },
+		{ name: "Due", type: "date", options: [] },
+		{ name: "Done", type: "checkbox", options: [] },
+	]);
+});
+
+test("a - in the type row means text", () => {
+	const lines = ["| A | B |", "| - | - |", "| - | __box |", "| x | [ ] |"];
+	assert.deepStrictEqual(Array.from(parseTypeRows(lines, 0, 3).config.cols, (c) => c.type), ["text", "checkbox"]);
+});
+
+test("an ascending sort by any column keeps the type row first and the option rows below it", () => {
+	const body = DASHED.slice(2);
+	for (let col = 0; col < 4; col++) {
+		const cell = (row) => row.split("|")[col + 1].trim();
+		const sorted = body.slice().sort((a, b) => cell(a).localeCompare(cell(b)));
+		const lines = DASHED.slice(0, 2).concat(sorted);
+		const parsed = parseTypeRows(lines, 0, lines.length - 1);
+		assert.strictEqual(parsed.config.cols[1].type, "select", "column " + col);
+		assert.deepStrictEqual(Array.from(parsed.config.cols[1].options).sort(),["Doing", "Todo"], "column " + col);
+		// Sorting by the select column orders its __ cells among themselves; in every other
+		// column the __ cell sorts first, then the - cells, then the data.
+		if (col !== 1) {
+			assert.strictEqual(parsed.typeLine, 2, "column " + col);
+			assert.deepStrictEqual(Array.from(parsed.configLines), [2, 3, 4], "column " + col);
+		}
+	}
+});
+
 test("an empty type cell means text in the __ format", () => {
 	const lines = ["| A | B |", "| - | - |", "|  | __box |", "| x | [ ] |"];
 	assert.deepStrictEqual(Array.from(parseTypeRows(lines, 0, 3).config.cols, (c) => c.type), ["text", "checkbox"]);

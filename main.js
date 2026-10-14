@@ -14,14 +14,15 @@
  *     source (known limitation) — controls simply aren't shown then. That is the honest,
  *     non-surprising fallback the PRD §9 describes, not a bug.
  *
- * Config lives inside the table, in rows whose cells are all "__"-prefixed or empty (see
- * parseMarkedRows): a type row and option rows (one option per row and column). They are found
- * by their cells wherever a sort by column moves them:
+ * Config lives inside the table, in rows whose cells are all "__"-prefixed, "-" or empty (see
+ * parseMarkedRows): a type row and option rows (one option per row and column, "-" for none).
+ * They are found by their cells wherever a sort by column moves them; an ascending sort keeps
+ * them in this order, because "__" sorts before "-" and "-" before the data:
  *   | Task   | Status   | Due    | Amount     | Done  |
  *   | ----   | ------   | ----   | --------   | ----  |
  *   | __text | __select | __date | __currency | __    |
- *   |        | __Todo   |        | __USD      |       |
- *   |        | __Doing  |        |            |       |
+ *   | -      | __Todo   | -      | __USD      | -     |
+ *   | -      | __Doing  | -      | -          | -     |
  *   | PRD    | Doing    | 2026-07-22 | 1200   | [x]   |
  *
  * The older format, an HTML comment above the table followed by one empty line, is still read:
@@ -104,24 +105,34 @@ function isSectionEndRow(line) {
 	return cells.length > 0 && (cells.every((c) => /^=+$/.test(c)) || isDelimiterRow(line));
 }
 
-// Prefix of every type and option cell; a config row has only such cells and empty ones.
+// Prefix of every type and option cell; a config row has only such cells and blank ones.
 const CONFIG_MARK = "__";
 
-// Whether a table row is a config row: every cell empty or starting with CONFIG_MARK, and
+// Content of an option row cell without an option. A sort by column puts "-" after the
+// "__" cells and before the data, so the option rows stay below the type row.
+const NO_OPTION = "-";
+
+// Whether a config row cell holds nothing: empty or NO_OPTION.
+function isBlankConfigCell(c) {
+	return c === "" || c === NO_OPTION;
+}
+
+// Whether a table row is a config row: every cell blank or starting with CONFIG_MARK, and
 // at least one starting with it.
 function isMarkedRow(line) {
 	const cells = splitRowCells(line || "");
-	return cells.some((c) => c.startsWith(CONFIG_MARK)) && cells.every((c) => c === "" || c.startsWith(CONFIG_MARK));
+	return cells.some((c) => c.startsWith(CONFIG_MARK)) && cells.every((c) => isBlankConfigCell(c) || c.startsWith(CONFIG_MARK));
 }
 
-// The cells of a config row without the mark (empty cells stay empty).
+// The cells of a config row without the mark (blank cells become empty).
 function unmarkedCells(line) {
-	return splitRowCells(line).map((c) => (c.startsWith(CONFIG_MARK) ? c.slice(CONFIG_MARK.length).trim() : c));
+	return splitRowCells(line).map((c) => (c.startsWith(CONFIG_MARK) ? c.slice(CONFIG_MARK.length).trim() : isBlankConfigCell(c) ? "" : c));
 }
 
-// The type names of a config row read as type row: a lone CONFIG_MARK is the shortcut for box.
+// The type names of a config row read as type row: a lone CONFIG_MARK is the shortcut for box,
+// a blank cell means text.
 function typeCellsOf(line) {
-	return splitRowCells(line).map((c) => (c === CONFIG_MARK ? "box" : c.startsWith(CONFIG_MARK) ? c.slice(CONFIG_MARK.length).trim() : c));
+	return splitRowCells(line).map((c) => (c === CONFIG_MARK ? "box" : c.startsWith(CONFIG_MARK) ? c.slice(CONFIG_MARK.length).trim() : isBlankConfigCell(c) ? "" : c));
 }
 
 // A type as written into a type row: box as the lone CONFIG_MARK, others prefixed.
@@ -149,12 +160,12 @@ function configOf(headerCells, typeCells, optionRows) {
 	return { id: null, version: "1", cols };
 }
 
-// Config encoded inside the table itself in rows of only "__"-prefixed and empty cells:
+// Config encoded inside the table itself in rows of only "__"-prefixed and blank cells:
 //   | Task   | Status   | Due    |    <- header
 //   | ----   | ------   | ----   |    <- delimiter
 //   | __text | __select | __     |    <- type row (empty = text, a lone __ = box = checkbox)
-//   |        | __Todo   |        |    <- option rows: one option per row and column
-//   |        | __Done   |        |
+//   | -      | __Todo   | -      |    <- option rows: one option per row and column, - = none
+//   | -      | __Done   | -      |
 //   | PRD    | Doing    | ...    |    <- data rows
 // The rows may stand anywhere in the table (sorting by a column moves them), so they are
 // found by their cells, not by position: the type row is the config row of type names.
@@ -521,7 +532,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		editor.replaceRange("\n" + typeRow, { line: top + 1, ch: delimiter.length });
 		new Notice(
 			`Table Fields: marked table (${headerCells.length} columns). Edit the type row; ` +
-			`add options in rows of __-prefixed or empty cells, like |  | __Todo |.`
+			`add options in rows of __-prefixed cells and - for none, like | - | __Todo |.`
 		);
 	}
 };
@@ -1045,18 +1056,20 @@ function buildUsageMd(img) {
 	"## Set up a table",
 	"",
 	"Below the header's --- line, add a row with each column's type, then one row per dropdown",
-	"option (or currency code). Start their cells with __ and leave the others empty:",
+	"option (or currency code). Start their cells with __ and put a - in the option cells without",
+	"an option:",
 	"",
 	"    | Task      | Status   | Due        | Done  |",
 	"    | --------- | -------- | ---------- | ----- |",
 	"    | __text    | __select | __date     | __    |",
-	"    |           | __Todo   |            |       |",
-	"    |           | __Doing  |            |       |",
-	"    |           | __Done   |            |       |",
+	"    | -         | __Todo   | -          | -     |",
+	"    | -         | __Doing  | -          | -     |",
+	"    | -         | __Done   | -          | -     |",
 	"    | Draft PRD | Doing    | 2026-07-22 | [x]   |",
 	"",
 	"An empty type cell means text, a lone __ means a checkbox (box). The plugin hides these rows",
 	"when it shows the table, and finds them wherever sorting the table by a column moves them.",
+	"Sorting ascending keeps the type row first and the option rows right below it.",
 	"",
 	"Or: put your cursor in any normal table and run the command **Table Fields: Mark table under",
 	"cursor as Table Fields** — it adds the type row from your data. Then right-click a header to",
@@ -1096,22 +1109,23 @@ const SKILL_TEXT = [
 	"below. Never add formulas and never convert a table into a database or JSON.",
 	"",
 	"THE CONFIG ROWS",
-	"Config rows are rows whose cells are each either empty or start with __ (at least one does).",
-	"They usually follow the header's --- row, but sorting the table may move them anywhere:",
+	"Config rows are rows whose cells each start with __, are a single - or are empty (at least one",
+	"starts with __). They usually follow the header's --- row, but sorting the table may move them:",
 	"",
 	"    | Task   | Status   | Due    | Amount     | Done  |",
 	"    | ----   | ------   | ----   | --------   | ----  |",
 	"    | __text | __select | __date | __currency | __    |",
-	"    |        | __Todo   |        | __USD      |       |",
-	"    |        | __Doing  |        |            |       |",
-	"    |        | __Done   |        |            |       |",
+	"    | -      | __Todo   | -      | __USD      | -     |",
+	"    | -      | __Doing  | -      | -          | -     |",
+	"    | -      | __Done   | -      | -          | -     |",
 	"    | ...    | ...      | ...    | ...        | ...   |",
 	"",
 	"- Type row: the config row of type names, one per column: text, box, select, date, currency,",
 	"  percentage. An empty cell means text, a lone __ means box; checkbox is an alias of box.",
 	"- Option rows: the other config rows, one option per row and column. For select, the allowed",
-	"  values; for currency, a single ISO currency code such as USD. Leave a cell empty for no",
-	"  option. Write a | inside an option as \\|.",
+	"  values; for currency, a single ISO currency code such as USD. Write a single - in a cell",
+	"  without an option, so an ascending sort keeps the option rows right below the type row",
+	"  (older tables leave such cells empty). Write a | inside an option as \\|.",
 	"- All other rows are data rows. Never add a second --- row: Obsidian deletes it.",
 	"Older tables may have the type and option rows unprefixed right after the --- row, ended by a",
 	"row of === or ---, or an HTML comment above the table (<!-- table-fields ... cols: ... -->)",
@@ -1129,8 +1143,8 @@ const SKILL_TEXT = [
 	"RULES",
 	"1. Keep it a valid GFM pipe table: a header row, a --- delimiter row, the config rows, then data",
 	"   rows. Every row starts and ends with a pipe and has the same number of cells as there are columns.",
-	"2. In type and option rows, start every non-empty cell with __. A data row must have at least",
-	"   one non-empty cell that does not start with __.",
+	"2. In type and option rows, start every cell with __, except empty type cells and - option",
+	"   cells. A data row must have at least one cell that is neither empty, - nor starts with __.",
 	"3. Do not invent formulas or computed cells. Percentages and currency are literal values.",
 	"4. For select cells, only use values listed in that column's option rows. If a new value is",
 	"   needed, add it as an option too (add an option row if the column has no free cell left).",
@@ -1157,7 +1171,7 @@ const SKILL_TEXT = [
 	"User: \"Mark 'Draft PRD' as done and add a Priority column with Low/Medium/High.\"",
 	"You: set that row's Done cell to [x]; add a Priority column whose type cell is __select and whose",
 	"option cells are __Low, __Medium and __High (adding option rows if needed), with --- in the",
-	"delimiter row, empty cells in other config rows and a value such as High in every data row.",
+	"delimiter row, - in its cells of the other option rows and a value such as High in every data row.",
 ].join("\n");
 
 async function renderMarkdownInto(app, md, el, component, sourcePath = "") {

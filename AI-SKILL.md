@@ -14,16 +14,16 @@ below. Never add formulas and never convert a table into a database or JSON.
 
 ### The config rows
 
-Config rows are rows whose cells are each either empty or start with `__` (at least one does).
-They usually follow the header's `---` row, but sorting the table may move them anywhere:
+Config rows are rows whose cells each start with `__`, are a single `-` or are empty (at least one
+starts with `__`). They usually follow the header's `---` row, but sorting the table may move them:
 
 ```markdown
 | Task   | Status   | Due    | Amount     | Done  |
 | ----   | ------   | ----   | --------   | ----  |
 | __text | __select | __date | __currency | __    |
-|        | __Todo   |        | __USD      |       |
-|        | __Doing  |        |            |       |
-|        | __Done   |        |            |       |
+| -      | __Todo   | -      | __USD      | -     |
+| -      | __Doing  | -      | -          | -     |
+| -      | __Done   | -      | -          | -     |
 | ...    | ...      | ...    | ...        | ...   |
 ```
 
@@ -31,8 +31,9 @@ They usually follow the header's `---` row, but sorting the table may move them 
   `currency`, `percentage`. An empty cell means `text`, a lone `__` means `box`; `checkbox` is an
   alias of `box`.
 - **Option rows**: the other config rows, one option per row and column. For `select`, the
-  allowed values; for `currency`, a single ISO currency code such as `USD`. Leave a cell empty for
-  no option. Write a `|` inside an option as `\|`.
+  allowed values; for `currency`, a single ISO currency code such as `USD`. Write a single `-` in a
+  cell without an option, so an ascending sort keeps the option rows right below the type row
+  (older tables leave such cells empty). Write a `|` inside an option as `\|`.
 - All other rows are data rows. Never add a second `---` row: Obsidian's table editor deletes it.
 
 Older tables may have the type and option rows unprefixed right after the `---` row, ended by a
@@ -56,8 +57,8 @@ Values are stored in this plain, canonical form; the plugin only formats them on
 
 1. Keep it a valid GFM pipe table: header row, a `---` delimiter row, the config rows, then data
    rows. Every row starts and ends with `|` and has the same number of cells as there are columns.
-2. In type and option rows, start every non-empty cell with `__`. A data row must have at least
-   one non-empty cell that does not start with `__`.
+2. In type and option rows, start every cell with `__`, except empty type cells and `-` option
+   cells. A data row must have at least one cell that is neither empty, `-` nor starts with `__`.
 3. No formulas or computed cells. Percentages and currency are literal values the user maintains.
 4. For `select` cells, only use values listed in that column's option rows; if a new value is
    needed, add it as an option too (add an option row if the column has no free cell left).
@@ -90,4 +91,5 @@ done/true, a currency number is money in that column's currency, `60%` means six
 
 Set that row's Done cell to `[x]`; add a `Priority` column whose type cell is `__select` and whose
 option cells are `__Low`, `__Medium` and `__High` (adding option rows if needed), with `---` in the
-delimiter row, empty cells in other config rows and a value such as `High` in every data row.
+delimiter row, `-` in its cells of the other option rows and a value such as `High` in every data
+row.
