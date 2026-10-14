@@ -614,6 +614,46 @@ function getCellRanges(lineText, lineFrom) {
 	return cells;
 }
 
+// Compares two non-empty cell values of a column by its type: numbers by value, boxes
+// unchecked first, select values in option order (others after them), the rest as text.
+function compareCellValues(a, b, col) {
+	const type = col ? col.type : "text";
+	if (type === "currency" || type === "percentage") {
+		const na = Number(a.replace(/[%, ]/g, ""));
+		const nb = Number(b.replace(/[%, ]/g, ""));
+		if (isFinite(na) && isFinite(nb)) return na - nb;
+	}
+	if (type === "checkbox" && CHECKBOX_RE.test(a) && CHECKBOX_RE.test(b)) return isChecked(a) - isChecked(b);
+	if (type === "select" && col.options && col.options.length) {
+		const rank = (v) => (col.options.includes(v) ? col.options.indexOf(v) : col.options.length);
+		const diff = rank(a) - rank(b);
+		if (diff !== 0) return diff;
+	}
+	return a.localeCompare(b, undefined, { numeric: true });
+}
+
+// The table's body lines (headerLine + 2 .. lastRowLine) sorted by column colIndex: the config
+// rows first (type row, then option rows in their order), then the data rows ordered by that
+// column, empty cells last in both directions. Equal values keep their order.
+function sortTableRows(lines, table, colIndex, descending) {
+	const col = table.config.cols[colIndex];
+	const configLines = Array.from(table.configLines || []);
+	const configSet = new Set(configLines);
+	const head = configLines.filter((ln) => ln === table.typeLine).concat(configLines.filter((ln) => ln !== table.typeLine));
+	const data = [];
+	for (let ln = table.headerLine + 2; ln <= table.lastRowLine; ln++) {
+		if (!configSet.has(ln)) data.push(lines[ln]);
+	}
+	const valueOf = (line) => unescapePipes(splitRowCells(line)[colIndex] || "");
+	const keyed = data.map((line) => ({ line, value: valueOf(line) }));
+	keyed.sort((x, y) => {
+		if (x.value === "" || y.value === "") return (x.value === "") - (y.value === "");
+		const c = compareCellValues(x.value, y.value, col);
+		return descending ? -c : c;
+	});
+	return head.map((ln) => lines[ln]).concat(keyed.map((k) => k.line));
+}
+
 // Replace one cell's source range via a CM6 transaction (the write-back, Q2).
 function dispatchCell(view, cell, newValue) {
 	view.dispatch({ changes: { from: cell.from, to: cell.to, insert: " " + escapePipes(newValue) + " " } });
@@ -769,7 +809,7 @@ class SmartTableWidget extends WidgetType {
 			if (headerCells[colIndex]) th.setAttribute(SOURCE_POS_ATTR, String(cellSourcePos(headerCells[colIndex])));
 			th.setAttribute(NATIVE_ROW_ATTR, "-1");
 			th.setAttribute(NATIVE_COL_ATTR, String(colIndex));
-			th.setAttr("title", "Right-click to set column type");
+			th.setAttr("title", "Right-click to set column type or sort");
 			th.addEventListener("contextmenu", (evt) => {
 				evt.preventDefault();
 				this.showColumnMenu(view, colIndex, col, evt);
@@ -802,7 +842,8 @@ class SmartTableWidget extends WidgetType {
 	destroy(dom) {
 		if (dom.tfComponent) dom.tfComponent.unload();
 	}
-	// Right-click a header -> pick the column's type (rewrites the type cell or the comment).
+	// Right-click a header -> pick the column's type (rewrites the type cell or the comment),
+	// or sort the rows by the column.
 	showColumnMenu(view, colIndex, col, evt) {
 		const menu = new Menu();
 		menu.addItem((i) => i.setTitle("Column: " + col.name).setDisabled(true));
@@ -830,7 +871,24 @@ class SmartTableWidget extends WidgetType {
 					});
 			});
 		}
+		menu.addSeparator();
+		menu.addItem((item) => item.setTitle("Sort ascending").setIcon("arrow-up-narrow-wide").onClick(() => this.sortRows(view, colIndex, false)));
+		menu.addItem((item) => item.setTitle("Sort descending").setIcon("arrow-down-wide-narrow").onClick(() => this.sortRows(view, colIndex, true)));
 		menu.showAtMouseEvent(evt);
+	}
+
+	// Rewrites the table's body rows sorted by one column, config rows kept at the top.
+	sortRows(view, colIndex, descending) {
+		const doc = view.state.doc;
+		const t = this.data.table;
+		if (!t || t.lastRowLine < t.headerLine + 2) return;
+		const lines = [];
+		for (let ln = 0; ln <= t.lastRowLine; ln++) lines.push(doc.line(ln + 1).text);
+		const sorted = sortTableRows(lines, t, colIndex, descending);
+		const from = doc.line(t.headerLine + 3).from;
+		const to = doc.line(t.lastRowLine + 1).to;
+		const insert = sorted.join("\n");
+		if (insert !== doc.sliceString(from, to)) view.dispatch({ changes: { from, to, insert } });
 	}
 
 	// Let our controls handle their own events instead of the editor.
@@ -883,7 +941,7 @@ function buildSmartTableDecorations(state) {
 			const typeMark = t.marked ? CONFIG_MARK : "";
 			const headerCells = getCellRanges(fromLine.text, fromLine.from);
 			const widget = new SmartTableWidget({
-				config: t.config, rows, signature, configRange, typeCells, typeMark, headerCells, from, to, headerLine: t.headerLine,
+				config: t.config, rows, signature, configRange, typeCells, typeMark, headerCells, from, to, headerLine: t.headerLine, table: t,
 			});
 			builder.add(from, to, Decoration.replace({ widget, block: true }));
 		}
@@ -1049,7 +1107,8 @@ function buildUsageMd(img) {
 	"- **Dropdowns** — pick a status or category from a fixed list, so values never drift.",
 	"- **Money, %, and dates that look right** — amounts line up with a currency symbol, dates read",
 	"  in your local format, percentages align neatly.",
-	"- **Right-click a column header** to set what it is — no config screen to hunt through.",
+	"- **Right-click a column header** to set what it is or to sort by it, type and option rows",
+	"  kept at the top — no config screen to hunt through.",
 	"- **Works while you read *and* while you edit.**",
 	"- **Nothing locked in** — it is always a plain Markdown table on disk.",
 	"",

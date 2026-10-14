@@ -19,7 +19,7 @@ file, no lock-in.
 - 🔽 **Dropdowns** — pick a status or category from a fixed list, so values never drift.
 - 💲 **Money, %, and dates that look right** — amounts line up with a currency symbol, dates read in
   your local format, percentages align neatly.
-- 🖱️ **Right-click a column to set what it is** — no settings screen to hunt through.
+- 🖱️ **Right-click a column to set what it is or sort by it** — no settings screen to hunt through.
 - 👀 **Works while you read *and* while you edit** — the controls show up in both modes.
 - 🧹 **Nothing locked in** — it's always a plain Markdown table on disk.
 
@@ -121,6 +121,10 @@ immediately, leave the note and open it again to refresh the rendered dropdown.
    Fields"** — it looks at your data and sets up the columns for you.
 3. Want to change a column? **Right-click its header** and pick the type (text, box (checkbox), dropdown,
    date, money, or percent).
+4. Want to sort? The same menu has **Sort ascending** and **Sort descending**. The type and option
+   rows stay at the top; the data rows are ordered by the column's type (numbers by value, dates
+   by date, unchecked boxes before checked ones, dropdown values in the order of their options),
+   and empty cells go last.
 
 That's it. Click your checkboxes and dropdowns; everything saves back into the note automatically.
 
@@ -133,7 +137,8 @@ That's it. Click your checkboxes and dropdowns; everything saves back into the n
   right.
 - **Percent columns** — kept as simple `60%` text, aligned for easy scanning.
 - **Date columns** — stored in a standard form, shown in your local date style.
-- **Right-click setup** — change any column's type from the table itself, no config screen needed.
+- **Right-click setup** — change any column's type or sort by it from the table itself, no config
+  screen needed.
 
 ## Let your AI read and edit your tables
 
