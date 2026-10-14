@@ -23,7 +23,12 @@ file, no lock-in.
 - 👀 **Works while you read *and* while you edit** — the controls show up in both modes.
 - 🧹 **Nothing locked in** — it's always a plain Markdown table on disk.
 
-## A type row gives each column its field type
+## A type row or a comment gives each column its field type
+
+You can describe the columns in one of two ways. Both give the same result, and the plugin reads
+either one.
+
+### Option 1: `__` type rows inside the table
 
 Below the header's `---` line you write a row with each column's type and one row per dropdown
 option. Their cells start with `__` or stay empty, which is how the plugin finds them, even after
@@ -40,19 +45,51 @@ you sort the table by a column. The data rows follow:
 | Review designs | Todo     | 2026-07-24 | [ ]   |
 ```
 
-…and in your note it becomes a table where **Status** is a dropdown, **Due** shows a tidy date, and
-**Done** is a real checkbox you can click. Tick it, and the change is saved straight into the table.
-The plugin hides the type and option rows; without the plugin they show as ordinary rows.
-Tables set up with the older `<!-- table-fields ... -->` comment above the table keep working.
+The plugin hides the type and option rows; without the plugin they show as ordinary rows. This is
+the format the plugin writes when you mark a table or change a column's type.
+
+### Option 2: an HTML comment above the table
+
+You write (or generate) a small comment like this. Leave one empty line between the comment and the
+table, otherwise Obsidian does not render the table:
+
+```markdown
+<!-- table-fields id="tasks" v="1"
+cols:
+  - {name: "Task",   type: "text"}
+  - {name: "Status", type: "select", options: ["Todo","Doing","Done"]}
+  - {name: "Due",    type: "date"}
+  - {name: "Done",   type: "box"}
+-->
+
+| Task           | Status | Due        | Done |
+| -------------- | ------ | ---------- | ---- |
+| Draft PRD      | Doing  | 2026-07-22 | [x]  |
+| Review designs | Todo   | 2026-07-24 | [ ]  |
+```
+
+The comment is invisible in Reading view and keeps the table itself free of extra rows.
+
+Either way, in your note it becomes a table where **Status** is a dropdown, **Due** shows a tidy
+date, and **Done** is a real checkbox you can click. Tick it, and the change is saved straight into
+the table.
+
+### Checkbox columns have several spellings
+
+A checkbox column can be written as `box` or as `checkbox`; both mean the same. In a type row a lone
+`__` is the short form of `__box`, so `__`, `__box` and `__checkbox` are equivalent. An empty cell
+in the type row means `text`.
 
 ![Right-click a column header to choose its Table Fields type.](assets/readme/02-field-type-menu.png)
 
 ## Dropdown choices are edited in Source mode
 
-Switch the note to **Source mode**, find the `type: "select"` column, and edit its `options` list —
-for example `options: ["Low","Medium","High"]`. When you switch back to Reading view or Live Preview,
-the dropdown uses that list. Tip: if the new choices do not appear immediately, leave the note and
-open it again to refresh the rendered dropdown.
+Switch the note to **Source mode** and edit the choices of the `select` column. With type rows, each
+choice is a `__`-prefixed cell in that column's option rows, for example `__Low`, `__Medium`,
+`__High`; add an option row if the column needs more choices than there are rows. With a comment,
+edit the column's `options` list, for example `options: ["Low","Medium","High"]`. When you switch
+back to Reading view or Live Preview, the dropdown uses the new choices. Tip: if they do not appear
+immediately, leave the note and open it again to refresh the rendered dropdown.
 
 ![Edit dropdown choices in Source mode by changing the select column's options list.](assets/readme/05-edit-dropdown-options.png)
 
@@ -76,7 +113,7 @@ open it again to refresh the rendered dropdown.
 1. Write a normal Markdown table.
 2. Put your cursor in it and run the command **"Table Fields: Mark table under cursor as Table
    Fields"** — it looks at your data and sets up the columns for you.
-3. Want to change a column? **Right-click its header** and pick the type (text, box, dropdown,
+3. Want to change a column? **Right-click its header** and pick the type (text, box (checkbox), dropdown,
    date, money, or percent).
 
 That's it. Click your checkboxes and dropdowns; everything saves back into the note automatically.
