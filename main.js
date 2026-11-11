@@ -313,12 +313,17 @@ function formatCurrency(raw, code) {
 	}
 }
 
+// A date cell: `yyyy-MM-dd`, optionally with a time `HH:mm` or `HH:mm:ss` joined by `_` or `T`
+// (`2026-11-11_08:32`, as SpocWeb.Capture writes it; the `_` keeps the cell one word).
+const DATE_RE = /^(\d{4}-\d{2}-\d{2})(?:[_T](\d{2}:\d{2}(?::\d{2})?))?$/;
+
 function formatDate(raw) {
-	const v = raw.trim();
-	if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
-	const d = new Date(v + "T00:00:00");
+	const m = DATE_RE.exec(raw.trim());
+	if (!m) return null;
+	const d = new Date(m[1] + "T" + (m[2] || "00:00:00"));
 	if (isNaN(d.getTime())) return null;
-	return d.toLocaleDateString();
+	if (!m[2]) return d.toLocaleDateString();
+	return d.toLocaleDateString() + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 /* ------------------------------ the plugin ------------------------------ */
@@ -549,7 +554,7 @@ function splitRowCells(line) {
 
 function inferType(sample) {
 	if (CHECKBOX_RE.test(sample)) return "box";
-	if (/^\d{4}-\d{2}-\d{2}$/.test(sample)) return "date";
+	if (DATE_RE.test(sample)) return "date";
 	if (/^\d+(\.\d+)?%$/.test(sample)) return "percentage";
 	if (/^\d+(\.\d+)?$/.test(sample)) return "currency";
 	return "text";
