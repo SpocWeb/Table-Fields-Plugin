@@ -228,6 +228,28 @@ function resolveTable(lines, headerLine, lastRowLine) {
 	return null;
 }
 
+// The metadata table above the table at headerLine: a table whose first header cell is
+// `Column` with at least one other known column (Type, Options, Unit, Scale, Description; any
+// order, others ignored); only blank lines and one title line may stand between the two.
+// Returns { start, end, cols: [{ name, type, options, unit, scale, description }] } (0-based
+// lines of its header and last row; type as fieldType() or null, scale a number or null) or null.
+// Plan table-metadata-legend step 1 (spec in test/metadata-table.test.js).
+function findMetaTableAbove(lines, headerLine) {
+	throw new Error("not implemented: plan table-metadata-legend step 1");
+}
+
+// The header cell tooltip of a column: its description, then unit and scale in parentheses
+// ("fastest run (ms)", "cost of all runs (k EUR)"); unit alone without a description; "" if none.
+function headerTooltip(col) {
+	throw new Error("not implemented: plan table-metadata-legend step 1");
+}
+
+// The Reading view header suffix of a column: "[ms]", "[k EUR]" (scale 1000 as k, 1e6 as M,
+// else ×<scale>), "" without unit and scale. Cell values are never reformatted.
+function headerSuffix(col) {
+	throw new Error("not implemented: plan table-metadata-legend step 1");
+}
+
 /* ------------------------------ cell utilities ------------------------------ */
 
 const CHECKBOX_RE = /^\[[ xX]\]$/;
