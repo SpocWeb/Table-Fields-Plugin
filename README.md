@@ -25,8 +25,8 @@ file, no lock-in.
 
 ## A type row or a comment gives each column its field type
 
-You can describe the columns in one of two ways. Both give the same result, and the plugin reads
-either one.
+You can describe the columns in one of three ways. They give the same result, and the plugin reads
+all of them.
 
 ### Option 1: `__` type rows inside the table
 
@@ -78,6 +78,46 @@ The comment is invisible in Reading view and keeps the table itself free of extr
 Either way, in your note it becomes a table where **Status** is a dropdown, **Due** shows a tidy
 date, and **Done** is a real checkbox you can click. Tick it, and the change is saved straight into
 the table.
+
+### Option 3: a metadata table above the table
+
+A visible table whose first header cell is `Column` describes the columns of the table below it.
+It may have the columns `Type`, `Options`, `Unit`, `Scale` and `Description` in any order;
+other columns are kept and ignored.
+Only blank lines and one title line may stand between the two tables.
+An empty `Type` means `text`; `box` is the checkbox.
+`Scale` is a plain number, the divisor of the shown values:
+`4.2` with Scale `1000` and Unit `EUR` means 4 200 EUR.
+`Options` are comma separated (`Todo, Doing`; write `\,` for a comma inside an option);
+the plugin reads them but writes options only as `__` option rows.
+Option rows (and keyed rows `__unit:ms`, `__scale:1000`, one row per key) in the data table work as in Option 1,
+without a type row:
+
+```markdown
+Columns of Runs:
+
+| Column | Type   | Unit | Scale | Description                 |
+|--------|--------|------|------:|-----------------------------|
+| Min    |        | ms   |       | fastest run                 |
+| Cost   |        | EUR  |  1000 | cost of all runs            |
+| Status | select |      |       | state of the job's last run |
+| Done   | box    |      |       | reviewed by me              |
+
+| Min | Cost | Status  | Done |
+|----:|-----:|---------|------|
+| -   | -    | __Todo  | -    |
+| -   | -    | __Doing | -    |
+| 340 |  4.2 | Doing   | [ ]  |
+```
+
+The metadata table stays an ordinary visible table.
+The plugin shows each column's description, unit and scale as the header cell's tooltip,
+and in Reading view the unit as a suffix (`Cost [k EUR]`; Scale `1000` as `k`, `1000000` as `M`, else `×<scale>`).
+Cell values are never reformatted.
+If a type, option, unit or scale is given both here and in `__` rows, the `__` rows win;
+the description exists only here.
+Changing a column's type in the header menu writes it where that column's type already is,
+else into the metadata table, never into a comment.
 
 ### Checkbox columns have several spellings
 

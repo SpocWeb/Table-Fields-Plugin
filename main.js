@@ -58,7 +58,7 @@ function parseConfigBlock(raw) {
 				.map((s) => s.trim().replace(/^"|"$/g, ""))
 				.filter((s) => s.length > 0);
 		}
-		cols.push({ name, type, options });
+		cols.push({ name, type, options, unit: null, scale: null, description: null });
 	}
 	return { id: idMatch ? idMatch[1] : null, version: vMatch ? vMatch[1] : "1", cols };
 }
@@ -145,19 +145,50 @@ function isTypeCells(cells) {
 	return cells.some((t) => t !== "") && cells.every((t) => t === "" || FIELD_TYPES.includes(t.toLowerCase()));
 }
 
-// The column config from the header row, the type cells and the option rows' cells.
-function configOf(headerCells, typeCells, optionRows) {
+// A keyed config row cell without its mark: `unit:ms` or `scale:1000`.
+const KEYED_CELL_RE = /^(unit|scale):(.*)$/i;
+
+// The column config from the header row, the type cells, the option rows' cells and the keyed
+// rows' cells (`unit:<u>`, `scale:<number>`; one config row per key).
+function configOf(headerCells, typeCells, optionRows, keyedRows = []) {
 	const cols = headerCells.map((name, i) => ({
 		name: unescapePipes(name),
 		type: fieldType(typeCells[i]) || "text",
 		options: [],
+		unit: null,
+		scale: null,
+		description: null,
 	}));
 	for (const cells of optionRows) {
 		cells.forEach((c, i) => {
 			if (c && cols[i]) cols[i].options.push(unescapePipes(c));
 		});
 	}
+	for (const cells of keyedRows) {
+		cells.forEach((c, i) => {
+			const m = KEYED_CELL_RE.exec(c);
+			if (!m || !cols[i]) {
+				return;
+			}
+			const value = unescapePipes(m[2]).trim();
+			if (m[1].toLowerCase() === "unit") {
+				cols[i].unit = value === "" ? null : value;
+			} else {
+				cols[i].scale = scaleOf(value);
+			}
+		});
+	}
 	return { id: null, version: "1", cols };
+}
+
+// A scale cell as a number, or null when empty or not a finite number.
+function scaleOf(text) {
+	const t = (text || "").trim();
+	if (t === "" || t === NO_OPTION) {
+		return null;
+	}
+	const n = Number(t);
+	return Number.isFinite(n) ? n : null;
 }
 
 // Config encoded inside the table itself in rows of only "__"-prefixed and blank cells:
@@ -169,16 +200,23 @@ function configOf(headerCells, typeCells, optionRows) {
 //   | PRD    | Doing    | ...    |    <- data rows
 // The rows may stand anywhere in the table (sorting by a column moves them), so they are
 // found by their cells, not by position: the type row is the config row of type names.
+// Keyed config rows (`| __unit:ms | - |`, `| - | __scale:1000 |`) give unit and scale, never options.
+// Without a type row there is no config unless allowNoType (a metadata table gives the types):
+// then option rows alone are config rows and typeLine is null.
 // Returns { config, typeLine, configLines, marked: true } (0-based lines) or null.
-function parseMarkedRows(lines, headerLine, lastRowLine) {
+function parseMarkedRows(lines, headerLine, lastRowLine, allowNoType = false) {
 	const configLines = [];
 	for (let ln = headerLine + 2; ln <= lastRowLine; ln++) {
 		if (isMarkedRow(lines[ln])) configLines.push(ln);
 	}
-	const typeLine = configLines.find((ln) => isTypeCells(typeCellsOf(lines[ln])));
-	if (typeLine === undefined) return null;
-	const optionRows = configLines.filter((ln) => ln !== typeLine).map((ln) => unmarkedCells(lines[ln]));
-	const config = configOf(splitRowCells(lines[headerLine]), typeCellsOf(lines[typeLine]), optionRows);
+	const keyedLines = configLines.filter((ln) => unmarkedCells(lines[ln]).some((c) => KEYED_CELL_RE.test(c)));
+	const found = configLines.find((ln) => !keyedLines.includes(ln) && isTypeCells(typeCellsOf(lines[ln])));
+	if (found === undefined && !(allowNoType && configLines.length > 0)) return null;
+	const typeLine = found === undefined ? null : found;
+	const optionRows = configLines.filter((ln) => ln !== typeLine && !keyedLines.includes(ln)).map((ln) => unmarkedCells(lines[ln]));
+	const keyedRows = keyedLines.map((ln) => unmarkedCells(lines[ln]));
+	const typeCells = typeLine === null ? [] : typeCellsOf(lines[typeLine]);
+	const config = configOf(splitRowCells(lines[headerLine]), typeCells, optionRows, keyedRows);
 	return { config, typeLine, configLines, marked: true };
 }
 
@@ -202,9 +240,9 @@ function parsePositionalRows(lines, headerLine, lastRowLine) {
 
 // The type rows of the table at headerLine..lastRowLine: marked, else the older positional
 // format. Returns { config, typeLine, configLines, marked } or null.
-function parseTypeRows(lines, headerLine, lastRowLine) {
+function parseTypeRows(lines, headerLine, lastRowLine, allowNoType = false) {
 	if (headerLine + 2 > lastRowLine || !isDelimiterRow(lines[headerLine + 1])) return null;
-	return parseMarkedRows(lines, headerLine, lastRowLine) || parsePositionalRows(lines, headerLine, lastRowLine);
+	return parseMarkedRows(lines, headerLine, lastRowLine, allowNoType) || parsePositionalRows(lines, headerLine, lastRowLine);
 }
 
 // Last row line of the table whose header is at headerLine.
@@ -215,17 +253,91 @@ function lastTableRow(lines, headerLine) {
 }
 
 // Config of the table at headerLine..lastRowLine. Type rows inside the table win over a
-// comment above it. Returns { config, configLines, typeLine, marked, comment } or null:
+// metadata table above it, which wins over a comment above it. A metadata table above makes the
+// table smart even without a type row (the __ rows win for type, options, unit and scale; the
+// description comes only from the metadata table). The metadata table itself is never smart.
+// Returns { config, configLines, typeLine, marked, comment, meta } or null:
 // configLines are the body lines holding config, not data (empty for the comment format);
-// typeLine is set for type rows, comment ({ start, end }) for the comment format.
+// typeLine is set for type rows, comment ({ start, end }) for the comment format,
+// meta ({ start, end }) for the metadata table, else null.
 function resolveTable(lines, headerLine, lastRowLine) {
-	const rows = parseTypeRows(lines, headerLine, lastRowLine);
-	if (rows) return Object.assign({ comment: null }, rows);
+	const meta = metaColumns(splitRowCells(lines[headerLine] || "")) ? null : findMetaTableAbove(lines, headerLine);
+	const metaRange = meta ? { start: meta.start, end: meta.end } : null;
+	const rows = parseTypeRows(lines, headerLine, lastRowLine, meta !== null);
+	if (rows) {
+		if (meta) {
+			const typeCells = rows.typeLine === null ? [] : typeCellsOf(lines[rows.typeLine]);
+			mergeMeta(rows.config, meta, typeCells);
+		}
+		return Object.assign({ comment: null, meta: metaRange }, rows);
+	}
+	if (meta) {
+		const config = configOf(splitRowCells(lines[headerLine]), [], []);
+		mergeMeta(config, meta, []);
+		return { config, configLines: [], typeLine: null, marked: false, comment: null, meta: metaRange };
+	}
 	const comment = findCommentAbove(lines, headerLine);
 	if (comment && comment.config.cols.length > 0) {
-		return { config: comment.config, configLines: [], typeLine: null, marked: false, comment };
+		return { config: comment.config, configLines: [], typeLine: null, marked: false, comment, meta: null };
 	}
 	return null;
+}
+
+// Merges a metadata table into a config by column name: the __ rows win for type (a cell that
+// is not blank), options, unit and scale (L7); the description comes only from the metadata table.
+function mergeMeta(config, meta, typeCells) {
+	const byName = new Map();
+	for (const m of meta.cols) {
+		if (!byName.has(m.name)) {
+			byName.set(m.name, m);
+		}
+	}
+	config.cols.forEach((col, i) => {
+		const m = byName.get(col.name);
+		if (!m) {
+			return;
+		}
+		if (!fieldType(typeCells[i]) && m.type) {
+			col.type = m.type;
+		}
+		if (col.options.length === 0) {
+			col.options = m.options.slice();
+		}
+		if (col.unit === null) {
+			col.unit = m.unit;
+		}
+		if (col.scale === null) {
+			col.scale = m.scale;
+		}
+		col.description = m.description;
+	});
+}
+
+// The known columns of a metadata table header as { type, options, unit, scale, description }
+// (cell indices, any order), or null when the first cell is not `Column` or no other known
+// column is there.
+function metaColumns(headerCells) {
+	if (headerCells.length === 0 || headerCells[0].toLowerCase() !== "column") {
+		return null;
+	}
+	const map = {};
+	headerCells.forEach((c, i) => {
+		const key = c.toLowerCase();
+		if (i > 0 && META_KEYS.includes(key) && !(key in map)) {
+			map[key] = i;
+		}
+	});
+	return Object.keys(map).length > 0 ? map : null;
+}
+
+const META_KEYS = ["type", "options", "unit", "scale", "description"];
+
+// The options of a metadata table cell: comma separated, `\,` a comma and `\|` a pipe in an option.
+function splitMetaOptions(text) {
+	return (text || "")
+		.split(/(?<!\\),/)
+		.map((s) => s.trim().replace(/\\,/g, ",").replace(/\\\|/g, "|"))
+		.filter((s) => s !== "");
 }
 
 // The metadata table above the table at headerLine: a table whose first header cell is
@@ -233,21 +345,121 @@ function resolveTable(lines, headerLine, lastRowLine) {
 // order, others ignored); only blank lines and one title line may stand between the two.
 // Returns { start, end, cols: [{ name, type, options, unit, scale, description }] } (0-based
 // lines of its header and last row; type as fieldType() or null, scale a number or null) or null.
-// Plan table-metadata-legend step 1 (spec in test/metadata-table.test.js).
 function findMetaTableAbove(lines, headerLine) {
-	throw new Error("not implemented: plan table-metadata-legend step 1");
+	let i = headerLine - 1;
+	const skipBlank = () => {
+		while (i >= 0 && lines[i].trim() === "") {
+			i--;
+		}
+	};
+	skipBlank();
+	if (i >= 0 && !lines[i].includes("|")) {
+		i--; // the one title line
+		skipBlank();
+	}
+	if (i < 0 || !lines[i].includes("|")) {
+		return null;
+	}
+	const end = i;
+	let start = i;
+	while (start > 0 && lines[start - 1].trim() !== "" && lines[start - 1].includes("|")) {
+		start--;
+	}
+	if (start + 1 > end || !isDelimiterRow(lines[start + 1])) {
+		return null;
+	}
+	const map = metaColumns(splitRowCells(lines[start]));
+	if (!map) {
+		return null;
+	}
+	const cols = [];
+	for (let ln = start + 2; ln <= end; ln++) {
+		const cells = splitRowCells(lines[ln]);
+		const name = unescapePipes(cells[0] || "");
+		if (name === "") {
+			continue;
+		}
+		const cell = (key) => (key in map ? cells[map[key]] || "" : "");
+		const type = fieldType(cell("type"));
+		const unit = unescapePipes(cell("unit"));
+		const description = unescapePipes(cell("description"));
+		cols.push({
+			name,
+			type: FIELD_TYPES.includes(type) ? type : null,
+			options: splitMetaOptions(cell("options")),
+			unit: unit === "" ? null : unit,
+			scale: scaleOf(cell("scale")),
+			description: description === "" ? null : description,
+		});
+	}
+	return { start, end, cols };
+}
+
+// The unit of a column with its scale, as "k EUR" (scale 1000 as k, 1e6 as M, else ×<scale>);
+// "" without unit and scale.
+function unitLabel(col) {
+	const scale = col.scale && col.scale !== 1 ? col.scale : null;
+	const prefix = scale === null ? "" : scale === 1000 ? "k" : scale === 1e6 ? "M" : "×" + scale;
+	const unit = col.unit || "";
+	return prefix !== "" && unit !== "" ? prefix + " " + unit : prefix + unit;
 }
 
 // The header cell tooltip of a column: its description, then unit and scale in parentheses
 // ("fastest run (ms)", "cost of all runs (k EUR)"); unit alone without a description; "" if none.
 function headerTooltip(col) {
-	throw new Error("not implemented: plan table-metadata-legend step 1");
+	const label = unitLabel(col);
+	if (!col.description) {
+		return label;
+	}
+	return label === "" ? col.description : col.description + " (" + label + ")";
 }
 
 // The Reading view header suffix of a column: "[ms]", "[k EUR]" (scale 1000 as k, 1e6 as M,
 // else ×<scale>), "" without unit and scale. Cell values are never reformatted.
 function headerSuffix(col) {
-	throw new Error("not implemented: plan table-metadata-legend step 1");
+	const label = unitLabel(col);
+	return label === "" ? "" : "[" + label + "]";
+}
+
+// The lines of the metadata table (meta.start..meta.end) with the type of column `name` set to
+// `typeText` in its Type cell: the cell is replaced in place; a missing row is appended and a
+// missing Type column added as the last column; every other cell and column is kept.
+function metaWithType(lines, meta, name, typeText) {
+	const out = lines.slice(meta.start, meta.end + 1);
+	const header = splitRowCells(out[0]);
+	const map = metaColumns(header);
+	const rebuild = (cells) => "| " + cells.join(" | ") + " |";
+	let typeIdx = map && "type" in map ? map.type : -1;
+	if (typeIdx < 0) {
+		typeIdx = header.length;
+		out.forEach((line, k) => {
+			out[k] = rebuild(splitRowCells(line).concat(k === 0 ? ["Type"] : k === 1 ? ["---"] : [""]));
+		});
+	}
+	const width = Math.max(header.length, typeIdx + 1);
+	const target = escapePipes(name);
+	for (let k = 2; k < out.length; k++) {
+		const cells = splitRowCells(out[k]);
+		if (unescapePipes(cells[0] || "") !== unescapePipes(name)) {
+			continue;
+		}
+		const ranges = getCellRanges(out[k], 0);
+		if (ranges[typeIdx]) {
+			out[k] = out[k].slice(0, ranges[typeIdx].from) + " " + typeText + " " + out[k].slice(ranges[typeIdx].to);
+		} else {
+			while (cells.length < width) {
+				cells.push("");
+			}
+			cells[typeIdx] = typeText;
+			out[k] = rebuild(cells);
+		}
+		return out;
+	}
+	const cells = new Array(width).fill("");
+	cells[0] = target;
+	cells[typeIdx] = typeText;
+	out.push(rebuild(cells));
+	return out;
 }
 
 /* ------------------------------ cell utilities ------------------------------ */
@@ -418,6 +630,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 						this.enhanceCell(td, col, rowIndex, colIndex, el, ctx);
 					});
 				});
+				decorateHeaderCells(table, config);
 			}
 		} catch (e) {
 			console.error("[tf] enhanceTables error:", e);
@@ -563,6 +776,32 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		);
 	}
 };
+
+// Reading view: a column with a description, unit or scale gets it as its header cell's tooltip,
+// and the unit as a small suffix after the header text ("Cost [k EUR]"). Cell values stay as written.
+function decorateHeaderCells(table, config) {
+	if (!config.cols.some((c) => headerTooltip(c) !== "")) {
+		return;
+	}
+	const ths = Array.from(table.querySelectorAll("thead th"));
+	ths.forEach((th, i) => {
+		const col = config.cols[i];
+		if (!col) {
+			return;
+		}
+		const tip = headerTooltip(col);
+		if (tip !== "") {
+			th.setAttribute("title", tip);
+		}
+		const suffix = headerSuffix(col);
+		if (suffix !== "" && !th.querySelector(".tf-unit")) {
+			const span = activeDocument.createElement("span");
+			span.className = "tf-unit";
+			span.textContent = " " + suffix;
+			th.appendChild(span);
+		}
+	});
+}
 
 /* ------------------------------ helpers for the command ------------------------------ */
 
@@ -836,7 +1075,8 @@ class SmartTableWidget extends WidgetType {
 			if (headerCells[colIndex]) th.setAttribute(SOURCE_POS_ATTR, String(cellSourcePos(headerCells[colIndex])));
 			th.setAttribute(NATIVE_ROW_ATTR, "-1");
 			th.setAttribute(NATIVE_COL_ATTR, String(colIndex));
-			th.setAttr("title", "Right-click to set column type or sort");
+			const tip = headerTooltip(col);
+			th.setAttr("title", (tip !== "" ? tip + "\n" : "") + "Right-click to set column type or sort");
 			th.addEventListener("contextmenu", (evt) => {
 				evt.preventDefault();
 				this.showColumnMenu(view, colIndex, col, evt);
@@ -885,9 +1125,23 @@ class SmartTableWidget extends WidgetType {
 					.setTitle(ty)
 					.setChecked(col.type === fieldType(ty))
 					.onClick(() => {
+						// Where the column's type already is: a filled type row cell, else the
+						// metadata table (also when it has none yet), else the type row, else the comment.
+						const typeCell = this.data.typeCells ? this.data.typeCells[colIndex] : null;
+						const inRow = typeCell && !isBlankConfigCell((typeCell.text || "").trim());
+						const meta = this.data.table && this.data.table.meta;
+						if (!inRow && meta) {
+							const doc = view.state.doc;
+							const lines = [];
+							for (let ln = 0; ln <= meta.end; ln++) {
+								lines.push(doc.line(ln + 1).text);
+							}
+							const insert = metaWithType(lines, meta, col.name, ty).join("\n");
+							view.dispatch({ changes: { from: doc.line(meta.start + 1).from, to: doc.line(meta.end + 1).to, insert } });
+							return;
+						}
 						if (this.data.typeCells) {
-							const cell = this.data.typeCells[colIndex];
-							if (cell) dispatchCell(view, cell, this.data.typeMark ? typeCellText(ty) : ty);
+							if (typeCell) dispatchCell(view, typeCell, this.data.typeMark ? typeCellText(ty) : ty);
 							return;
 						}
 						// The comment format keeps the long name the original plugin reads.
@@ -955,7 +1209,7 @@ function buildSmartTableDecorations(state) {
 				sigParts.push(cells.map((c) => c.text).join("|"));
 			}
 			const signature =
-				from + ":" + to + ":" + t.config.cols.map((c) => c.name + "/" + c.type + "/" + (c.options || []).join(".")).join(",") + ":" + sigParts.join("//");
+				from + ":" + to + ":" + t.config.cols.map((c) => c.name + "/" + c.type + "/" + (c.options || []).join(".") + "/" + headerTooltip(c)).join(",") + ":" + sigParts.join("//");
 			// Where a column type change is written: the comment, or the type row's cells.
 			const configRange = t.comment
 				? { from: state.doc.line(t.comment.start + 1).from, to: state.doc.line(t.comment.end + 1).to }

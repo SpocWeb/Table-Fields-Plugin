@@ -13,7 +13,6 @@ const { test } = require("node:test");
 const assert = require("node:assert");
 const { loadPlugin } = require("./load-plugin");
 
-const PENDING = { skip: "pending: plan table-metadata-legend step 1" };
 
 const plugin = loadPlugin();
 const { findSmartTables, findMetaTableAbove, parseTypeRows, sortTableRows, headerTooltip, headerSuffix } = plugin;
@@ -56,7 +55,7 @@ const KEYED = [
 
 const col = (name, type, options, unit, scale, description) => ({ name, type, options, unit, scale, description });
 
-test("a metadata table above a table is read by column name: empty cells null, box as checkbox, Scale a number", PENDING, () => { // L2, L4, L11, L12
+test("a metadata table above a table is read by column name: empty cells null, box as checkbox, Scale a number", () => { // L2, L4, L11, L12
 	assert.deepStrictEqual(json(findMetaTableAbove(TARGET, 12)), {
 		start: 2,
 		end: 8,
@@ -70,12 +69,12 @@ test("a metadata table above a table is read by column name: empty cells null, b
 	});
 });
 
-test("known metadata columns in any order, unknown ones ignored, options split at unescaped commas", PENDING, () => { // L11, L19
+test("known metadata columns in any order, unknown ones ignored, options split at unescaped commas", () => { // L11, L19
 	const lines = ["| Column | Note | Options | Type |", "|---|---|---|---|", "| S | mine | Todo, Doing\\, waiting, a\\|b | select |", "", "| S |", "|---|", "| Todo |"];
 	assert.deepStrictEqual(json(findMetaTableAbove(lines, 4).cols), [col("S", "select", ["Todo", "Doing, waiting", "a|b"], null, null, null)]);
 });
 
-test("a metadata table applies to the next table only across blank lines and one title line", PENDING, () => { // L3
+test("a metadata table applies to the next table only across blank lines and one title line", () => { // L3
 	const meta = ["| Column | Description |", "|---|---|", "| A | the a |"];
 	const cases = [
 		[[...meta, "", "| A |", "|---|"], 4],
@@ -87,7 +86,7 @@ test("a metadata table applies to the next table only across blank lines and one
 	assert.deepStrictEqual(cases.map(([lines, header]) => findMetaTableAbove(lines, header) !== null), [true, true, false, false, false]);
 });
 
-test("the table below a metadata table is smart: types from the metadata table, options from __ rows without a type row", PENDING, () => { // L16, L17
+test("the table below a metadata table is smart: types from the metadata table, options from __ rows without a type row", () => { // L16, L17
 	const tables = findSmartTables(TARGET.join("\n"));
 	assert.strictEqual(tables.length, 1);
 	const [t] = tables;
@@ -104,7 +103,7 @@ test("the table below a metadata table is smart: types from the metadata table, 
 	]);
 });
 
-test("a metadata table with descriptions only makes the table below a smart table of text columns", PENDING, () => { // L4, L14
+test("a metadata table with descriptions only makes the table below a smart table of text columns", () => { // L4, L14
 	const doc = ["| Column | Description |", "|---|---|", "| HRV | heart rate variability |", "", "| Day | HRV |", "|---|---:|", "| Mo | 42 |"].join("\n");
 	const tables = findSmartTables(doc);
 	assert.strictEqual(tables.length, 1);
@@ -114,7 +113,7 @@ test("a metadata table with descriptions only makes the table below a smart tabl
 	]);
 });
 
-test("keyed __unit: and __scale: rows are config rows giving unit and scale, never options", PENDING, () => { // L18
+test("keyed __unit: and __scale: rows are config rows giving unit and scale, never options", () => { // L18
 	const parsed = parseTypeRows(KEYED, 0, KEYED.length - 1);
 	assert.deepStrictEqual(json(parsed.configLines), [2, 3, 4, 5]);
 	assert.deepStrictEqual(json(parsed.config.cols).map(({ name, type, options, unit, scale }) => ({ name, type, options, unit, scale })), [
@@ -124,7 +123,7 @@ test("keyed __unit: and __scale: rows are config rows giving unit and scale, nev
 	]);
 });
 
-test("the __ rows win over the metadata table for type and unit; the description still comes from it", PENDING, () => { // L7
+test("the __ rows win over the metadata table for type and unit; the description still comes from it", () => { // L7
 	const doc = [
 		"| Column | Type   | Unit | Description |",
 		"|--------|--------|------|-------------|",
@@ -144,7 +143,7 @@ test("the __ rows win over the metadata table for type and unit; the description
 	]);
 });
 
-test("header tooltip: description with unit and scale in parentheses, unit alone, or nothing", PENDING, () => { // L14, L15
+test("header tooltip: description with unit and scale in parentheses, unit alone, or nothing", () => { // L14, L15
 	const cols = [
 		{ description: "fastest run", unit: "ms" },
 		{ description: "cost of all runs", unit: "EUR", scale: 1000 },
@@ -155,7 +154,7 @@ test("header tooltip: description with unit and scale in parentheses, unit alone
 	assert.deepStrictEqual(cols.map(headerTooltip), ["fastest run (ms)", "cost of all runs (k EUR)", "ms", "reviewed by me", ""]);
 });
 
-test("header suffix in Reading view: [unit] with scale 1000 as k, 1e6 as M, else ×scale", PENDING, () => { // L12, L14
+test("header suffix in Reading view: [unit] with scale 1000 as k, 1e6 as M, else ×scale", () => { // L12, L14
 	const cols = [{ unit: "ms" }, { unit: "EUR", scale: 1000 }, { unit: "EUR", scale: 1e6 }, { unit: "EUR", scale: 100 }, { scale: 1000 }, { description: "x" }];
 	assert.deepStrictEqual(cols.map(headerSuffix), ["[ms]", "[k EUR]", "[M EUR]", "[×100 EUR]", "[k]", ""]);
 });

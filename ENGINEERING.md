@@ -93,6 +93,10 @@ comment.
 | --- | --- |
 | `parseConfigBlock` / `serializeConfig` | Parse ⇄ serialize the `<!-- table-fields … -->` comment |
 | `findConfigForTable` / `findSmartTables` | Locate config for a table (reading view / whole-doc scan) |
+| `findMetaTableAbove` / `resolveTable` / `mergeMeta` | Read the metadata table above a table (`Column`, `Type`, `Options`, `Unit`, `Scale`, `Description`) and merge it by column name with the `__` rows (rows win); the table below is smart even without a type row |
+| `parseMarkedRows` / `configOf` | `__` type, option and keyed rows (`__unit:`, `__scale:`) |
+| `headerTooltip` / `headerSuffix` / `decorateHeaderCells` | Header cell tooltip (description, unit, scale) and the Reading view unit suffix |
+| `metaWithType` | Write-back of a header-menu type change into the metadata table (type row cell first, if the type is already there) |
 | `getCellRanges` | Character offsets of each cell (between pipes) — the basis of write-back |
 | `enhanceTables` / `enhanceCell` | Reading-view rendering + controls |
 | `smartTableField` / `buildSmartTableDecorations` | Live Preview CM6 decorations |
