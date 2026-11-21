@@ -82,12 +82,13 @@ function findCommentAbove(lines, headerLine) {
 }
 
 // Type names as written; `box` is the short name of `checkbox`, both are accepted.
-const FIELD_TYPES = ["text", "box", "checkbox", "select", "date", "currency", "percentage"];
+const FIELD_TYPES = ["text", "box", "checkbox", "select", "date", "currency", "percentage", "timespan", "duration"];
 
-// The internal type of a written type name: lower case, `box` read as `checkbox`.
+// The internal type of a written type name: lower case, `box` read as `checkbox`,
+// `duration` read as `timespan`.
 function fieldType(name) {
 	const t = (name || "").trim().toLowerCase();
-	return t === "box" ? "checkbox" : t;
+	return t === "box" ? "checkbox" : t === "duration" ? "timespan" : t;
 }
 
 // A GFM delimiter row: every cell is dashes with optional alignment colons.
@@ -560,6 +561,48 @@ function formatDate(raw) {
 	return d.toLocaleDateString() + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+// A timespan cell: a clock `h:mm:ss` (hours may exceed 24, seconds may have a fraction) or an
+// ISO 8601 duration without years and months (`PT3h`, `PT1H30M`, `P1DT12H`, `P2W`; case free).
+const TIMESPAN_CLOCK_RE = /^(\d+):([0-5]\d):([0-5]\d(?:\.\d+)?)$/;
+const TIMESPAN_ISO_RE = /^P(?:(\d+(?:\.\d+)?)W)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i;
+
+// A timespan cell as seconds, or null when it is neither a clock nor an ISO duration.
+function parseTimespan(raw) {
+	const t = (raw || "").trim();
+	const c = TIMESPAN_CLOCK_RE.exec(t);
+	if (c) {
+		return Number(c[1]) * 3600 + Number(c[2]) * 60 + Number(c[3]);
+	}
+	const m = TIMESPAN_ISO_RE.exec(t);
+	if (!m || /^PT?$/i.test(t) || /T$/i.test(t)) {
+		return null;
+	}
+	const n = (i) => (m[i] === undefined ? 0 : Number(m[i]));
+	return n(1) * 604800 + n(2) * 86400 + n(3) * 3600 + n(4) * 60 + n(5);
+}
+
+// Seconds as `[<w>w-][<d>d_]hh:mm:ss`: weeks and days only when there are any (`2w-3d_04:05:06`,
+// `1d_00:00:30`, `03:00:00`); fractions are rounded to whole seconds.
+function formatTimespan(seconds) {
+	let s = Math.round(seconds);
+	const weeks = Math.floor(s / 604800);
+	s -= weeks * 604800;
+	const days = Math.floor(s / 86400);
+	s -= days * 86400;
+	const p = (n) => String(n).padStart(2, "0");
+	const clock = p(Math.floor(s / 3600)) + ":" + p(Math.floor((s % 3600) / 60)) + ":" + p(s % 60);
+	if (weeks > 0) {
+		return weeks + "w-" + days + "d_" + clock;
+	}
+	return days > 0 ? days + "d_" + clock : clock;
+}
+
+// The displayed text of a timespan cell, or null when it cannot be parsed (shown as written).
+function formatTimespanCell(raw) {
+	const s = parseTimespan(raw);
+	return s === null ? null : formatTimespan(s);
+}
+
 /* ------------------------------ the plugin ------------------------------ */
 
 module.exports = class MarkdownSmartTablesPlugin extends Plugin {
@@ -571,7 +614,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		// that replaces the table's source lines with our own interactive table widget.
 		// Highest precedence: Obsidian's own table widget replaces the same lines, and for
 		// replace decorations on the same range the higher-precedence source wins.
-		this.registerEditorExtension([editedTableField, Prec.highest(smartTableField), resumeTablePlugin]);
+		this.registerEditorExtension([editedTableField, Prec.highest(smartTableField), resumeTablePlugin, revealSelectionPlugin]);
 
 		this.addCommand({
 			id: "mark-as-table-fields",
@@ -595,20 +638,12 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		try {
 			const tables = el.findAll ? el.findAll("table") : Array.from(el.querySelectorAll("table"));
 			if (tables.length === 0) return;
-			console.log("[tf] enhanceTables: found", tables.length, "table(s) in section");
+			// One section is one table: the section info and the split of the note are needed once.
+			const info = ctx.getSectionInfo(el);
+			if (!info) return; // cannot locate the source lines
+			const lines = info.text.split("\n");
 			for (const table of tables) {
-				const info = ctx.getSectionInfo(el);
-				if (!info) {
-					console.log("[tf]  -> getSectionInfo returned NULL (cannot locate source lines)");
-					continue;
-				}
-				const lines = info.text.split("\n");
 				const resolved = resolveTable(lines, info.lineStart, lastTableRow(lines, info.lineStart));
-				console.log(
-					"[tf]  -> lineStart=", info.lineStart,
-					"| headerLine=", JSON.stringify((lines[info.lineStart] || "").slice(0, 40)),
-					"| config cols=", resolved ? resolved.config.cols.length : "none"
-				);
 				if (!resolved) continue; // plain table -> untouched
 				const config = resolved.config;
 				// Type, option and end rows render as body rows (anywhere after a sort): hide
@@ -617,7 +652,6 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 
 				table.classList.add("tf-table");
 				const rows = Array.from(table.querySelectorAll("tbody tr"));
-				console.log("[tf]  -> enhancing", rows.length, "row(s),", config.cols.length, "col(s)");
 				rows.forEach((tr, rowIndex) => {
 					if (configLines.has(info.lineStart + 2 + rowIndex)) {
 						tr.classList.add("tf-config-row");
@@ -648,7 +682,8 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 				td.textContent = "";
 				td.appendChild(input);
 				td.classList.add("tf-cell-center");
-				this.registerDomEvent(input, "change", () => {
+				// The element owns its listener: registerDomEvent would keep one per cell until unload.
+				input.addEventListener("change", () => {
 					this.writeBackCell(el, ctx, rowIndex, colIndex, input.checked ? "[x]" : "[ ]");
 				});
 				break;
@@ -664,7 +699,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 				}
 				td.textContent = "";
 				td.appendChild(select);
-				this.registerDomEvent(select, "change", () => {
+				select.addEventListener("change", () => {
 					this.writeBackCell(el, ctx, rowIndex, colIndex, select.value);
 				});
 				break;
@@ -686,6 +721,15 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 					td.setAttr("title", raw); // keep ISO discoverable on hover
 				}
 				td.classList.add("tf-cell-date");
+				break;
+			}
+			case "timespan": {
+				const formatted = formatTimespanCell(raw);
+				if (formatted != null) {
+					td.textContent = formatted;
+					td.setAttr("title", raw);
+				}
+				td.classList.add("tf-cell-right");
 				break;
 			}
 			default:
@@ -816,6 +860,7 @@ function splitRowCells(line) {
 function inferType(sample) {
 	if (CHECKBOX_RE.test(sample)) return "box";
 	if (DATE_RE.test(sample)) return "date";
+	if (parseTimespan(sample) !== null) return "timespan";
 	if (/^\d+(\.\d+)?%$/.test(sample)) return "percentage";
 	if (/^\d+(\.\d+)?$/.test(sample)) return "currency";
 	return "text";
@@ -889,6 +934,11 @@ function compareCellValues(a, b, col) {
 		const nb = Number(b.replace(/[%, ]/g, ""));
 		if (isFinite(na) && isFinite(nb)) return na - nb;
 	}
+	if (type === "timespan") {
+		const ta = parseTimespan(a);
+		const tb = parseTimespan(b);
+		if (ta !== null && tb !== null) return ta - tb;
+	}
 	if (type === "checkbox" && CHECKBOX_RE.test(a) && CHECKBOX_RE.test(b)) return isChecked(a) - isChecked(b);
 	if (type === "select" && col.options && col.options.length) {
 		const rank = (v) => (col.options.includes(v) ? col.options.indexOf(v) : col.options.length);
@@ -927,8 +977,13 @@ function dispatchCell(view, cell, newValue) {
 
 // Render a text cell's Markdown (<br>, links, bold, code, ...) the way a native table
 // cell shows it. Without a render context (no app found) it falls back to plain text.
+// Characters and shapes that can make a cell render differently as Markdown (emphasis, code,
+// links, HTML, math, tags, escapes, bare URLs). A cell without any is plain text, and skipping
+// MarkdownRenderer for it is the main saving on large tables.
+const MARKDOWN_HINT_RE = /[\\`*_~<>\[\]!&$^=#|]|:\/\/|www\./;
+
 function renderCellMarkdown(td, text, md) {
-	if (!md || !text) {
+	if (!md || !text || !MARKDOWN_HINT_RE.test(text)) {
 		td.textContent = text;
 		return;
 	}
@@ -981,6 +1036,13 @@ function renderWidgetCell(td, col, cell, view, md) {
 			td.classList.add("tf-cell-date");
 			break;
 		}
+		case "timespan": {
+			const f = formatTimespanCell(raw);
+			td.textContent = f != null ? f : raw;
+			if (f != null) td.setAttr("title", raw);
+			td.classList.add("tf-cell-right");
+			break;
+		}
 		default:
 			renderCellMarkdown(td, raw, md);
 	}
@@ -1011,6 +1073,10 @@ function sourcePosOfClick(evt) {
 	const pos = Number(cell.getAttribute(SOURCE_POS_ATTR));
 	return Number.isFinite(pos) ? pos : null;
 }
+
+// Rows the widget builds before it returns, and the time one later frame spends on more rows.
+const FIRST_ROWS = 60;
+const SLICE_MS = 8;
 
 // The block widget that renders a whole smart table interactively in Live Preview.
 class SmartTableWidget extends WidgetType {
@@ -1087,7 +1153,8 @@ class SmartTableWidget extends WidgetType {
 		table.appendChild(thead);
 
 		const tbody = activeDocument.createElement("tbody");
-		for (const row of this.data.rows) {
+		const rows = this.data.rows;
+		const renderRow = (row) => {
 			const tr = activeDocument.createElement("tr");
 			row.cells.forEach((cell, colIndex) => {
 				const col = this.data.config.cols[colIndex];
@@ -1100,13 +1167,37 @@ class SmartTableWidget extends WidgetType {
 				else renderCellMarkdown(td, unescapePipes((cell.text || "").trim()), md);
 				tr.appendChild(td);
 			});
-			tbody.appendChild(tr);
+			return tr;
+		};
+		// The first rows are built at once, the rest in time-boxed slices of later frames, so a
+		// large table shows up (and the editor stays responsive) before every row exists.
+		let next = 0;
+		const renderSlice = (budgetMs, maxRows) => {
+			const start = performance.now();
+			const frag = activeDocument.createDocumentFragment();
+			while (next < rows.length && next < maxRows && performance.now() - start < budgetMs) {
+				frag.appendChild(renderRow(rows[next++]));
+			}
+			tbody.appendChild(frag);
+		};
+		renderSlice(Infinity, FIRST_ROWS);
+		if (next < rows.length) {
+			const step = () => {
+				wrap.tfFrame = 0;
+				renderSlice(SLICE_MS, rows.length);
+				if (next < rows.length) {
+					wrap.tfFrame = requestAnimationFrame(step);
+				}
+				view.requestMeasure(); // the block grew: let the editor re-measure its height
+			};
+			wrap.tfFrame = requestAnimationFrame(step);
 		}
 		table.appendChild(tbody);
 		wrap.appendChild(table);
 		return wrap;
 	}
 	destroy(dom) {
+		if (dom.tfFrame) cancelAnimationFrame(dom.tfFrame);
 		if (dom.tfComponent) dom.tfComponent.unload();
 	}
 	// Right-click a header -> sort the rows by the column, or pick the column's type (rewrites
@@ -1118,7 +1209,7 @@ class SmartTableWidget extends WidgetType {
 		menu.addSeparator();
 		menu.addItem((i) => i.setTitle("Column: " + col.name).setDisabled(true));
 		menu.addSeparator();
-		const types = ["text", "box", "select", "date", "currency", "percentage"];
+		const types = ["text", "box", "select", "date", "currency", "percentage", "timespan"];
 		for (const ty of types) {
 			menu.addItem((item) => {
 				item
@@ -1178,53 +1269,88 @@ class SmartTableWidget extends WidgetType {
 	}
 }
 
+// The smart tables of a document with their widgets, built once per document object: a move of
+// the cursor or a scroll never re-parses the note, only a change of the text does.
+// Cached as { text, tables: [{ t, from, to, widget }] }; each widget is built on first use.
+const tableCache = new WeakMap();
+
+function smartTablesOf(state) {
+	const doc = state.doc;
+	let entry = tableCache.get(doc);
+	if (!entry) {
+		const text = doc.toString();
+		const tables = findSmartTables(text).map((t) => ({
+			t,
+			// Replace the table, type rows included; a config comment above stays visible.
+			from: doc.line(t.headerLine + 1).from,
+			to: doc.line(t.lastRowLine + 1).to,
+			widget: null,
+		}));
+		entry = { text, tables };
+		tableCache.set(doc, entry);
+	}
+	return entry;
+}
+
+// The data rows of a table: its body lines without the config rows, each as { cells, line }.
+function tableRows(doc, t) {
+	const rows = [];
+	const configLines = new Set(t.configLines);
+	for (let ln = t.headerLine + 2; ln <= t.lastRowLine; ln++) {
+		if (configLines.has(ln)) continue; // type, option and end rows are not data
+		const line = doc.line(ln + 1);
+		rows.push({ cells: getCellRanges(line.text, line.from), line: ln });
+	}
+	return rows;
+}
+
+// The widget of a cached table; its rows are only computed when the widget draws itself.
+function widgetOf(state, entry, item) {
+	if (item.widget) return item.widget;
+	const doc = state.doc;
+	const { t, from, to } = item;
+	const signature =
+		from + ":" + to + ":" + t.config.cols.map((c) => c.name + "/" + c.type + "/" + (c.options || []).join(".") + "/" + headerTooltip(c)).join(",") + ":" + entry.text.slice(from, to);
+	// Where a column type change is written: the comment, or the type row's cells.
+	const configRange = t.comment
+		? { from: doc.line(t.comment.start + 1).from, to: doc.line(t.comment.end + 1).to }
+		: null;
+	let typeCells = null;
+	if (t.typeLine !== null) {
+		const typeRow = doc.line(t.typeLine + 1);
+		typeCells = getCellRanges(typeRow.text, typeRow.from);
+	}
+	const typeMark = t.marked ? CONFIG_MARK : "";
+	const headerLine = doc.line(t.headerLine + 1);
+	const headerCells = getCellRanges(headerLine.text, headerLine.from);
+	const data = { config: t.config, signature, configRange, typeCells, typeMark, headerCells, from, to, headerLine: t.headerLine, table: t };
+	let rows = null;
+	Object.defineProperty(data, "rows", {
+		enumerable: true,
+		get() {
+			if (!rows) rows = tableRows(doc, t);
+			return rows;
+		},
+	});
+	item.widget = new SmartTableWidget(data);
+	return item.widget;
+}
+
 // Build the decoration set for the current editor state.
 function buildSmartTableDecorations(state) {
 	try {
 		if (!state.field(editorLivePreviewField, false)) return Decoration.none; // Source mode -> raw
-		const text = state.doc.toString();
-		const tables = findSmartTables(text);
-		if (!tables.length) return Decoration.none;
+		const entry = smartTablesOf(state);
+		if (!entry.tables.length) return Decoration.none;
 		const sel = state.selection.main;
 		const editedValue = state.field(editedTableField, false);
 		const edited = editedValue && typeof editedValue === "object" ? editedValue : null;
 		const builder = new RangeSetBuilder();
-		for (const t of tables) {
-			// Replace the table, type rows included; a config comment above stays visible.
-			const fromLine = state.doc.line(t.headerLine + 1);
-			const toLine = state.doc.line(t.lastRowLine + 1);
-			const from = fromLine.from;
-			const to = toLine.to;
+		for (const item of entry.tables) {
+			const { from, to } = item;
 			if (sel.to >= from && sel.from <= to) continue; // cursor inside table -> show source
 			if (edited && edited.from <= to && edited.to >= from) continue; // handed to Obsidian's table editor
-
-			const rows = [];
-			const sigParts = [];
-			const configLines = new Set(t.configLines);
-			for (let ln = t.headerLine + 2; ln <= t.lastRowLine; ln++) {
-				if (configLines.has(ln)) continue; // type, option and end rows are not data
-				const line = state.doc.line(ln + 1);
-				const cells = getCellRanges(line.text, line.from);
-				rows.push({ cells, line: ln });
-				sigParts.push(cells.map((c) => c.text).join("|"));
-			}
-			const signature =
-				from + ":" + to + ":" + t.config.cols.map((c) => c.name + "/" + c.type + "/" + (c.options || []).join(".") + "/" + headerTooltip(c)).join(",") + ":" + sigParts.join("//");
-			// Where a column type change is written: the comment, or the type row's cells.
-			const configRange = t.comment
-				? { from: state.doc.line(t.comment.start + 1).from, to: state.doc.line(t.comment.end + 1).to }
-				: null;
-			let typeCells = null;
-			if (t.typeLine !== null) {
-				const typeRow = state.doc.line(t.typeLine + 1);
-				typeCells = getCellRanges(typeRow.text, typeRow.from);
-			}
-			const typeMark = t.marked ? CONFIG_MARK : "";
-			const headerCells = getCellRanges(fromLine.text, fromLine.from);
-			const widget = new SmartTableWidget({
-				config: t.config, rows, signature, configRange, typeCells, typeMark, headerCells, from, to, headerLine: t.headerLine, table: t,
-			});
-			builder.add(from, to, Decoration.replace({ widget, block: true }));
+			builder.add(from, to, Decoration.replace({ widget: widgetOf(state, entry, item), block: true }));
 		}
 		return builder.finish();
 	} catch (e) {
@@ -1369,6 +1495,53 @@ const resumeTablePlugin = ViewPlugin.fromClass(
 	}
 );
 
+/* --- find in note: show a hit inside a table --- */
+
+// Whether a decoration set has a range at pos (a widget over the table that holds pos).
+function decorationCovers(deco, pos) {
+	if (!deco || typeof deco.between !== "function") return false;
+	let hit = false;
+	deco.between(pos, pos, () => {
+		hit = true;
+		return false;
+	});
+	return hit;
+}
+
+// A find (Ctrl+F), a search result or an arrow key can put the selection inside a table that was
+// drawn as a widget. The table then turns into its source lines, but the editor had already
+// computed its scroll target from the widget's height, so the hit ends up off screen or in the
+// wrong place. This plugin waits until the layout has settled and scrolls the hit into view
+// (centered) when it is not visible. Moves that start a click-to-edit or change the text are left alone.
+const revealSelectionPlugin = ViewPlugin.fromClass(
+	class {
+		constructor(view) {
+			this.view = view;
+		}
+		update(u) {
+			if (!u.selectionSet || u.docChanged) return;
+			if (u.transactions.some((tr) => (tr.effects || []).some((e) => e.is && e.is(editTable)))) return;
+			const head = u.state.selection.main.head;
+			const before = u.startState.field(smartTableField, false);
+			const after = u.state.field(smartTableField, false);
+			if (!decorationCovers(before, head) || decorationCovers(after, head)) return;
+			clearTimeout(this.timer);
+			this.timer = setTimeout(() => requestAnimationFrame(() => this.reveal(head)), 0);
+		}
+		reveal(head) {
+			const view = this.view;
+			if (!view.dom.isConnected || view.state.selection.main.head !== head) return;
+			const c = view.coordsAtPos(head);
+			const box = view.scrollDOM.getBoundingClientRect();
+			if (c && c.top >= box.top && c.bottom <= box.bottom) return;
+			view.dispatch({ effects: EditorView.scrollIntoView(head, { y: "center" }) });
+		}
+		destroy() {
+			clearTimeout(this.timer);
+		}
+	}
+);
+
 /* ============================================================================
  * Settings tab — two sub-tabs: "Usage guide" and "AI skill" (copy-paste).
  * ==========================================================================*/
@@ -1427,6 +1600,8 @@ function buildUsageMd(img) {
 	"- **date** — stored as YYYY-MM-DD, shown in your local date style.",
 	"- **currency** — a plain number (e.g. 1200.00); the symbol comes from options (e.g. USD).",
 	"- **percentage** — kept as simple NN% text, right-aligned.",
+	"- **timespan** (or **duration**) — written as h:mm:ss or as an ISO duration like PT3h or PT1H30M;",
+	"  shown as [w-][d_]hh:mm:ss (2w-3d_04:05:06), right-aligned, sorted by length. The text stays as written.",
 	"",
 	"![Ticking a checkbox writes the value straight back to the Markdown table.](" + img("03-checkbox-field.png") + ")",
 	"",
@@ -1478,6 +1653,7 @@ const SKILL_TEXT = [
 	"- date: ISO date YYYY-MM-DD. Example: 2026-07-22",
 	"- currency: a plain number, no symbol or commas. Example: 1200.50",
 	"- percentage: a number followed by a percent sign. Example: 60%",
+	"- timespan (alias duration): h:mm:ss or an ISO 8601 duration without years and months. Examples: 12:34:56, PT3h, PT1H30M, P1DT12H",
 	"Values are stored in this plain, canonical form; the plugin only formats them on screen.",
 	"",
 	"RULES",

@@ -50,6 +50,7 @@ listing `{name, type, options}` per column in column order; read them the same w
 | date | ISO `YYYY-MM-DD` | `2026-07-22` |
 | currency | a plain number, no symbol/commas | `1200.50` |
 | percentage | a number followed by `%` | `60%` |
+| timespan (alias `duration`) | `h:mm:ss` or an ISO 8601 duration without years and months | `12:34:56`, `PT3h`, `PT1H30M` |
 
 Values are stored in this plain, canonical form; the plugin only formats them on screen.
 

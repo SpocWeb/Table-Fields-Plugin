@@ -104,6 +104,15 @@ comment.
 | `renderWidgetCell` / `dispatchCell` | Live Preview cell controls + write-back |
 | `MarkdownSmartTablesPlugin` | `onload`: registers post-processor, editor extension, command |
 
+### Large tables and find in note
+- `smartTablesOf` parses the note once per document object (`WeakMap` on `state.doc`); a cursor move or
+  scroll only re-selects which cached widgets show. A widget computes its `rows` lazily.
+- `SmartTableWidget.toDOM` builds the first `FIRST_ROWS` rows at once and the rest in `SLICE_MS` slices of
+  later frames (cancelled in `destroy`); text cells without Markdown hints skip `MarkdownRenderer`.
+- `revealSelectionPlugin`: when a selection lands in a table whose widget just stepped aside (Ctrl+F hit),
+  it scrolls the hit into view after the layout settled, because the editor had computed its scroll
+  target from the widget's height.
+
 ## Extending it
 
 - **New column type:** add a `case` in both `enhanceCell` (reading) and `renderWidgetCell` (LP);
