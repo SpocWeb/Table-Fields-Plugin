@@ -188,6 +188,28 @@ the Table Fields syntax and can read, create, and edit your tables for you.
 
 ![The AI skill tab in Table Fields settings, with a Copy to clipboard button and the ready-made prompt.](assets/readme/06-ai-skill-in-settings.png)
 
+## Tab padding keeps tables small and aligned in elastic-tabstop editors
+
+Turn on **Settings → Table Fields → Options → Tab before each cell's closing pipe**
+(off by default).
+From then on, every table Table Fields writes
+(a checkbox click, a dropdown choice, a sort, a type change, the mark command)
+is rewritten as a whole, header and `---` row included:
+each cell ends in one tab before its `|` instead of a run of spaces.
+Text is left-aligned, also in a centered or right-aligned column;
+number columns (currency, percentage, timespan, or columns holding only numbers)
+are right-aligned with spaces to their widest cell, their `---` cell filled with dashes.
+
+```text
+| Name<TAB>| Amount<TAB>| Note<TAB>|
+| :--:<TAB>| -----:<TAB>| ---<TAB>|
+| ab<TAB>|  12.50<TAB>| x<TAB>|
+```
+
+The `---` row still decides how Obsidian displays each column.
+Files get smaller, and an elastic-tabstop editor such as Rubberband lines the columns up.
+Tables the plugin does not write keep their padding.
+
 ## Privacy & payment
 
 **Free, and fully local.** Table Fields only reads and writes the tables in your own notes — nothing

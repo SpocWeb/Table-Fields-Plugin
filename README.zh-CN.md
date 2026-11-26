@@ -186,6 +186,27 @@ Table Fields 内置了一段给 AI 的现成提示词。打开 **设置 → Tabl
 
 ![Table Fields 设置里的 AI skill 标签页，带一个 Copy to clipboard 按钮和现成的提示词。](assets/readme/06-ai-skill-in-settings.png)
 
+## 制表符填充让表格更小，并在弹性制表位编辑器里对齐
+
+打开 **设置 → Table Fields → Options → Tab before each cell's closing pipe**（默认关闭）。
+之后 Table Fields 每次写入表格
+（勾选复选框、选择下拉值、排序、修改类型、标记命令）
+都会整体重写这张表格，包括表头和 `---` 行：
+每个单元格在 `|` 前以一个制表符结尾，而不是一串空格。
+文本左对齐，即使该列是居中或右对齐；
+数字列（currency、percentage、timespan，或只含数字的列）
+用空格右对齐到该列最宽的单元格，其 `---` 单元格用短横线填满。
+
+```text
+| Name<TAB>| Amount<TAB>| Note<TAB>|
+| :--:<TAB>| -----:<TAB>| ---<TAB>|
+| ab<TAB>|  12.50<TAB>| x<TAB>|
+```
+
+Obsidian 的显示对齐仍由 `---` 行决定。
+文件更小，Rubberband 等弹性制表位编辑器能把各列对齐。
+插件没有写入的表格保持原有填充。
+
 ## 隐私与收费
 
 **免费，且完全本地。** Table Fields 只读写你自己笔记里的表格——没有任何数据离开你的设备，没有账号或

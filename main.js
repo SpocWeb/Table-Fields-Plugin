@@ -33,8 +33,21 @@
  *   -->
  */
 
-const { Plugin, Notice, MarkdownView, Menu, PluginSettingTab, MarkdownRenderer, Component, Keymap, editorInfoField, editorLivePreviewField } = require("obsidian");
-const { StateField, StateEffect, RangeSetBuilder, Prec } = require("@codemirror/state");
+const { Plugin, Notice, MarkdownView, Menu, PluginSettingTab, Setting, MarkdownRenderer, Component, Keymap, editorInfoField, editorLivePreviewField } = require("obsidian");
+const { EditorState, StateField, StateEffect, RangeSetBuilder, Prec } = require("@codemirror/state");
+
+/* ------------------------------ settings ------------------------------ */
+
+// tabPadding: when the plugin writes a table, every cell is written as one space, the text and
+// one tab before its closing pipe (header and --- row included), instead of space padding.
+const DEFAULT_SETTINGS = { tabPadding: false };
+
+// The settings the editor extensions read; the plugin copies its loaded settings in here.
+const activeSettings = Object.assign({}, DEFAULT_SETTINGS);
+
+// userEvent of every table change the plugin dispatches in Live Preview; the tab padding
+// filter only reacts to these, never to the user's typing.
+const TF_WRITE = "tf.write";
 const { EditorView, Decoration, WidgetType, ViewPlugin } = require("@codemirror/view");
 
 /* ------------------------------ config parsing ------------------------------ */
@@ -607,6 +620,9 @@ function formatTimespanCell(raw) {
 
 module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 	async onload() {
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		Object.assign(activeSettings, this.settings);
+
 		// Reading view + inactive Live Preview content: markdown post-processor.
 		this.registerMarkdownPostProcessor((el, ctx) => this.enhanceTables(el, ctx));
 
@@ -614,7 +630,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		// that replaces the table's source lines with our own interactive table widget.
 		// Highest precedence: Obsidian's own table widget replaces the same lines, and for
 		// replace decorations on the same range the higher-precedence source wins.
-		this.registerEditorExtension([editedTableField, Prec.highest(smartTableField), resumeTablePlugin, revealSelectionPlugin]);
+		this.registerEditorExtension([editedTableField, Prec.highest(smartTableField), resumeTablePlugin, revealSelectionPlugin, tabPaddingFilter()]);
 
 		this.addCommand({
 			id: "mark-as-table-fields",
@@ -630,6 +646,11 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 
 	onunload() {
 		console.log("[table-fields] unloaded");
+	}
+
+	async saveSettings() {
+		Object.assign(activeSettings, this.settings);
+		await this.saveData(this.settings);
 	}
 
 	/* --- rendering path (Reading view + inactive Live Preview tables) --- */
@@ -762,7 +783,23 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 			if (dataLine >= editor.lineCount()) return;
 			const cur = editor.getLine(dataLine);
 			const next = apply(cur);
-			if (next != null && next !== cur) editor.setLine(dataLine, next);
+			if (next == null) return;
+			if (!activeSettings.tabPadding) {
+				if (next !== cur) editor.setLine(dataLine, next);
+				return;
+			}
+			// The cell and the table's padding in one editor transaction (one undo step).
+			const lines = editor.getValue().split("\n");
+			lines[dataLine] = next;
+			const padded = tabPadTouchedTables(lines, [[dataLine, dataLine]]);
+			const changedLines = new Set(padded.changed);
+			if (next !== cur) changedLines.add(dataLine);
+			const changes = Array.from(changedLines).map((ln) => ({
+				from: { line: ln, ch: 0 },
+				to: { line: ln, ch: editor.getLine(ln).length },
+				text: padded.lines[ln],
+			}));
+			if (changes.length > 0) editor.transaction({ changes });
 			return;
 		}
 
@@ -770,10 +807,11 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
 		if (!file) return;
 		this.app.vault.process(file, (data) => {
-			const lines = data.split("\n");
+			let lines = data.split("\n");
 			if (dataLine >= lines.length) return data;
 			const next = apply(lines[dataLine]);
 			if (next != null) lines[dataLine] = next;
+			if (activeSettings.tabPadding) lines = tabPadTouchedTables(lines, [[dataLine, dataLine]]).lines;
 			return lines.join("\n");
 		});
 	}
@@ -813,7 +851,14 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		const types = headerCells.map((_, i) => inferType((sampleCells[i] || "").trim()));
 		const typeRow = "| " + types.map(typeCellText).join(" | ") + " |";
 
-		editor.replaceRange("\n" + typeRow, { line: top + 1, ch: delimiter.length });
+		if (activeSettings.tabPadding) {
+			// The whole table with the new type row, padded, in one replacement.
+			const withType = lines.slice(0, top + 2).concat([typeRow], lines.slice(top + 2));
+			const padded = tabPadTouchedTables(withType, [[top, bottom + 1]]).lines;
+			editor.replaceRange(padded.slice(top, bottom + 2).join("\n"), { line: top, ch: 0 }, { line: bottom, ch: lines[bottom].length });
+		} else {
+			editor.replaceRange("\n" + typeRow, { line: top + 1, ch: delimiter.length });
+		}
 		new Notice(
 			`Table Fields: marked table (${headerCells.length} columns). Edit the type row; ` +
 			`add options in rows of __-prefixed cells and - for none, like | - | __Todo |.`
@@ -855,6 +900,133 @@ function splitRowCells(line) {
 	// drop trailing empty from a trailing pipe
 	if (cells.length && cells[cells.length - 1].trim() === "") cells.pop();
 	return cells.map((c) => c.trim());
+}
+
+// A delimiter cell (---, :--, --:, :-:) stretched to `width` dashes and colons, colons kept.
+function fillDelimiterCell(cell, width) {
+	const lead = cell.startsWith(":") ? ":" : "";
+	const trail = cell.length > 1 && cell.endsWith(":") ? ":" : "";
+	return lead + "-".repeat(Math.max(1, width - lead.length - trail.length)) + trail;
+}
+
+// A table row with its padding replaced. Every cell closed by a pipe ends in one tab before the
+// pipe. A text cell is one space and its trimmed text, whatever the --- row's alignment; a cell of
+// a right-aligned column (rightWidths: column index -> width) is one space and its text padded on
+// the left with spaces to the width (a --- cell stretched with dashes when `delimiter`); an empty
+// cell is one space. Whitespace-only text before the first pipe (indentation) and after the last
+// pipe (a trailing \r) stays; a last cell without a closing pipe gets no tab.
+function tabPadRow(line, rightWidths = null, delimiter = false) {
+	const pipes = findSeparatorPipes(line);
+	if (pipes.length === 0) return line;
+	const segs = [];
+	let from = 0;
+	for (const p of pipes) {
+		segs.push(line.slice(from, p));
+		from = p + 1;
+	}
+	const tail = line.slice(from);
+	const leading = segs[0].trim() === "";
+	const cellText = (text, k) => {
+		const width = rightWidths && text !== "" ? rightWidths.get(leading ? k - 1 : k) : undefined;
+		if (width === undefined) return text;
+		return delimiter ? fillDelimiterCell(text, width) : text.padStart(width);
+	};
+	const out = segs.map((s, k) => {
+		if (k === 0) return leading ? s : s.match(/^\s*/)[0] + cellText(s.trim(), 0) + "\t";
+		return " " + cellText(s.trim(), k) + "\t";
+	});
+	const end = tail.trim() === "" ? tail : " " + tail.trim() + (tail.endsWith("\r") ? "\r" : "");
+	return out.join("|") + "|" + end;
+}
+
+// Types whose columns are written right-aligned with tab padding.
+const NUMBER_TYPES = ["currency", "percentage", "timespan"];
+
+// A data cell that makes an untyped column a number column: a number, optionally signed, with
+// . or , separators and an optional %.
+const NUMBER_CELL_RE = /^[+-]?(\d+([.,]\d+)*|[.,]\d+)%?$/;
+
+// The tab-padded lines start..end (header, --- row, body) of one table, as a Map line -> text.
+// A column is right-aligned when its index is in `typedRight` or all its non-empty data cells
+// (body lines not in `configLines`, - counted as empty) are numbers; its width is the longest
+// cell of the header and body, at least the --- cell's colons plus three dashes.
+function tabPadTableLines(lines, start, end, typedRight, configLines) {
+	const cells = new Map();
+	for (let ln = start; ln <= end; ln++) cells.set(ln, splitRowCells(lines[ln]));
+	const columns = Math.max(0, ...Array.from(cells.values(), (c) => c.length));
+	const rightWidths = new Map();
+	for (let i = 0; i < columns; i++) {
+		let right = typedRight.has(i);
+		if (!right) {
+			const data = [];
+			for (let ln = start + 2; ln <= end; ln++) {
+				const c = cells.get(ln)[i] || "";
+				if (!configLines.has(ln) && c !== "" && c !== NO_OPTION) data.push(c);
+			}
+			right = data.length > 0 && data.every((c) => NUMBER_CELL_RE.test(c));
+		}
+		if (!right) continue;
+		const delim = cells.get(start + 1)[i] || "---";
+		let width = fillDelimiterCell(delim, 0).length + 2; // the colons and three dashes
+		for (let ln = start; ln <= end; ln++) {
+			if (ln !== start + 1) width = Math.max(width, (cells.get(ln)[i] || "").length);
+		}
+		rightWidths.set(i, width);
+	}
+	const out = new Map();
+	for (let ln = start; ln <= end; ln++) out.set(ln, tabPadRow(lines[ln], rightWidths, ln === start + 1));
+	return out;
+}
+
+// The lines with tab padding (tabPadTableLines) in every smart table that a touched line range
+// [first, last] (0-based, inclusive) overlaps: header to last row, and its metadata table above
+// (number columns found by content there). A touched config comment above also counts, but the
+// comment itself is not changed.
+// Returns { lines, changed } (a new array of the same length, changed line indices ascending).
+function tabPadTouchedTables(lines, touched) {
+	const out = lines.slice();
+	const changed = [];
+	for (const t of findSmartTables(lines.join("\n"))) {
+		const ranges = [[t.headerLine, t.lastRowLine]].concat(t.meta ? [[t.meta.start, t.meta.end]] : []);
+		const hit = ranges.concat(t.comment ? [[t.comment.start, t.comment.end]] : []);
+		if (!hit.some(([a, b]) => touched.some(([c, d]) => c <= b && a <= d))) continue;
+		const typedRight = new Set();
+		t.config.cols.forEach((c, i) => {
+			if (NUMBER_TYPES.includes(c.type)) typedRight.add(i);
+		});
+		const padded = [tabPadTableLines(lines, t.headerLine, t.lastRowLine, typedRight, new Set(t.configLines))];
+		if (t.meta) padded.push(tabPadTableLines(lines, t.meta.start, t.meta.end, new Set(), new Set()));
+		for (const m of padded) {
+			for (const [ln, text] of m) {
+				if (text !== lines[ln]) {
+					out[ln] = text;
+					changed.push(ln);
+				}
+			}
+		}
+	}
+	changed.sort((x, y) => x - y);
+	return { lines: out, changed };
+}
+
+// Editor extension: a plugin write (userEvent TF_WRITE) to a smart table, while the tabPadding
+// setting is on, also rewrites that table's padding in the same transaction (one undo step).
+function tabPaddingFilter() {
+	return EditorState.transactionFilter.of((tr) => {
+		if (!activeSettings.tabPadding || !tr.docChanged || !tr.isUserEvent(TF_WRITE)) return tr;
+		const doc = tr.newDoc;
+		const touched = [];
+		tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+			touched.push([doc.lineAt(fromB).number - 1, doc.lineAt(toB).number - 1]);
+		});
+		const { lines, changed } = tabPadTouchedTables(doc.toString().split("\n"), touched);
+		if (changed.length === 0) return tr;
+		const changes = changed.map((ln) => {
+			const line = doc.line(ln + 1);
+			return { from: line.from, to: line.to, insert: lines[ln] };
+		});
+		return [tr, { changes, sequential: true }];
+	});
 }
 
 function inferType(sample) {
@@ -972,7 +1144,7 @@ function sortTableRows(lines, table, colIndex, descending) {
 
 // Replace one cell's source range via a CM6 transaction (the write-back, Q2).
 function dispatchCell(view, cell, newValue) {
-	view.dispatch({ changes: { from: cell.from, to: cell.to, insert: " " + escapePipes(newValue) + " " } });
+	view.dispatch({ changes: { from: cell.from, to: cell.to, insert: " " + escapePipes(newValue) + " " }, userEvent: TF_WRITE });
 }
 
 // Render a text cell's Markdown (<br>, links, bold, code, ...) the way a native table
@@ -1228,7 +1400,7 @@ class SmartTableWidget extends WidgetType {
 								lines.push(doc.line(ln + 1).text);
 							}
 							const insert = metaWithType(lines, meta, col.name, ty).join("\n");
-							view.dispatch({ changes: { from: doc.line(meta.start + 1).from, to: doc.line(meta.end + 1).to, insert } });
+							view.dispatch({ changes: { from: doc.line(meta.start + 1).from, to: doc.line(meta.end + 1).to, insert }, userEvent: TF_WRITE });
 							return;
 						}
 						if (this.data.typeCells) {
@@ -1242,6 +1414,7 @@ class SmartTableWidget extends WidgetType {
 						const cfg = { id: this.data.config.id, version: this.data.config.version, cols };
 						view.dispatch({
 							changes: { from: this.data.configRange.from, to: this.data.configRange.to, insert: serializeConfig(cfg) },
+							userEvent: TF_WRITE,
 						});
 					});
 			});
@@ -1260,7 +1433,7 @@ class SmartTableWidget extends WidgetType {
 		const from = doc.line(t.headerLine + 3).from;
 		const to = doc.line(t.lastRowLine + 1).to;
 		const insert = sorted.join("\n");
-		if (insert !== doc.sliceString(from, to)) view.dispatch({ changes: { from, to, insert } });
+		if (insert !== doc.sliceString(from, to)) view.dispatch({ changes: { from, to, insert }, userEvent: TF_WRITE });
 	}
 
 	// Let our controls handle their own events instead of the editor.
@@ -1733,11 +1906,13 @@ class TableFieldsSettingTab extends PluginSettingTab {
 			for (const k in buttons) buttons[k].toggleClass("tf-tab-active", k === key);
 			body.empty();
 			if (key === "skill") this.renderSkill(body);
+			else if (key === "options") this.renderOptions(body);
 			else this.renderUsage(body);
 		};
 		const defs = [
 			{ key: "usage", label: "Usage guide" },
 			{ key: "skill", label: "AI skill" },
+			{ key: "options", label: "Options" },
 		];
 		for (const d of defs) {
 			const btn = tabbar.createEl("button", { text: d.label, cls: "tf-tab" });
@@ -1761,6 +1936,25 @@ class TableFieldsSettingTab extends PluginSettingTab {
 		this.previewComponent = new Component();
 		this.previewComponent.load();
 		renderMarkdownInto(this.app, buildUsageMd(img), md, this.previewComponent);
+	}
+
+	renderOptions(el) {
+		new Setting(el)
+			.setName("Tab before each cell's closing pipe")
+			.setDesc(
+				"When Table Fields writes a table (checkbox, dropdown, sort, type change, mark command), " +
+				"every row of that table, header and --- row included, ends each cell in one tab before " +
+				"the |: text left-aligned (| text<Tab>|), number columns (currency, percentage, timespan " +
+				"or only numbers) right-aligned with spaces. Smaller files whose columns still line up " +
+				"in an elastic-tabstop (Rubberband) editor; the --- row keeps setting the display " +
+				"alignment. Tables the plugin does not write stay as they are."
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.tabPadding).onChange(async (value) => {
+					this.plugin.settings.tabPadding = value;
+					await this.plugin.saveSettings();
+				})
+			);
 	}
 
 	renderSkill(el) {
