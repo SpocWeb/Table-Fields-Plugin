@@ -548,16 +548,20 @@ function splitRow(line) {
 	return { parts, cellOffset: leading ? 1 : 0 };
 }
 
-function formatCurrency(raw, code) {
+// A currency cell as shown: with an ISO code (the column's first option) in the locale's currency
+// style; without one no currency sign, only two decimals and grouping, followed by the column's
+// unit when it has one. Null when the cell is not a number.
+function formatCurrency(raw, code, unit = null) {
 	const n = Number(String(raw).replace(/[, ]/g, ""));
 	if (!isFinite(n)) return null;
+	if (!code) {
+		const plain = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+		return unit ? plain + " " + unit : plain;
+	}
 	try {
-		return new Intl.NumberFormat(undefined, {
-			style: "currency",
-			currency: code || "USD",
-		}).format(n);
+		return new Intl.NumberFormat(undefined, { style: "currency", currency: code }).format(n);
 	} catch (e) {
-		return (code || "$") + " " + n.toFixed(2);
+		return code + " " + n.toFixed(2);
 	}
 }
 
@@ -726,7 +730,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 				break;
 			}
 			case "currency": {
-				const formatted = formatCurrency(raw, col.options && col.options[0]);
+				const formatted = formatCurrency(raw, col.options && col.options[0], col.unit);
 				if (formatted != null) td.textContent = formatted;
 				td.classList.add("tf-cell-right");
 				break;
@@ -1208,7 +1212,7 @@ function renderWidgetCell(td, col, cell, view, md) {
 			break;
 		}
 		case "currency": {
-			const f = formatCurrency(raw, col.options && col.options[0]);
+			const f = formatCurrency(raw, col.options && col.options[0], col.unit);
 			td.textContent = f != null ? f : raw;
 			td.classList.add("tf-cell-right");
 			break;
@@ -1870,7 +1874,7 @@ function buildUsageMd(img) {
 	"- **box** (or **checkbox**) — stored as [x] or [ ], shown as a clickable box.",
 	"- **select** — a dropdown; the choices come from the column's options list.",
 	"- **date** — stored as YYYY-MM-DD, shown in your local date style.",
-	"- **currency** — a plain number (e.g. 1200.00); the symbol comes from options (e.g. USD).",
+	"- **currency** — a plain number (e.g. 1200.00); the symbol comes from options (e.g. EUR), none without one.",
 	"- **percentage** — kept as simple NN% text, right-aligned.",
 	"- **timespan** (or **duration**) — written as h:mm:ss or as an ISO duration like PT3h or PT1H30M;",
 	"  shown as [w-][d_]hh:mm:ss (2w-3d_04:05:06), right-aligned, sorted by length. The text stays as written.",

@@ -175,8 +175,9 @@ That's it. Click your checkboxes and dropdowns; everything saves back into the n
 - **Checkbox columns** — turn a column of `done / not done` into clickable boxes.
 - **Dropdown (select) columns** — give a column a fixed set of choices (like *Todo / Doing / Done*)
   so everyone uses the same words.
-- **Money columns** — type a plain number; it's shown with a currency symbol and lined up on the
-  right.
+- **Money columns** — type a plain number; it's lined up on the right with two decimals,
+  and with a currency symbol when the column's option row names a currency code such as `__EUR`.
+  Without a code no symbol is shown, only the column's unit if it has one.
 - **Percent columns** — kept as simple `60%` text, aligned for easy scanning.
 - **Date columns** — stored in a standard form, shown in your local date style.
 - **Right-click setup** — change any column's type or sort by it from the table itself, no config
