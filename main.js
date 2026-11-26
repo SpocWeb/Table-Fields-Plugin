@@ -630,7 +630,7 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 		// that replaces the table's source lines with our own interactive table widget.
 		// Highest precedence: Obsidian's own table widget replaces the same lines, and for
 		// replace decorations on the same range the higher-precedence source wins.
-		this.registerEditorExtension([editedTableField, Prec.highest(smartTableField), resumeTablePlugin, revealSelectionPlugin, tabPaddingFilter()]);
+		this.registerEditorExtension([editedTableField, Prec.highest(smartTableField), resumeTablePlugin, revealSelectionPlugin, tabPaddingFilter(), tabPadOnLeavePlugin]);
 
 		this.addCommand({
 			id: "mark-as-table-fields",
@@ -1685,6 +1685,88 @@ const resumeTablePlugin = ViewPlugin.fromClass(
 	}
 );
 
+/* --- tab padding after an edit outside the plugin --- */
+
+// userEvent of the padding this plugin adds after the user (or Obsidian's table editor, which
+// pads every row with spaces) changed a smart table.
+const TF_PAD = "tf.pad";
+
+// Splits the edited tables (`dirty`: a position inside each) into those to pad now and those to
+// keep waiting: a table waits while the cursor is in its source or the focus is in Obsidian's
+// editor of it (focusIn(item)); a position no longer inside a smart table is dropped.
+// tables: smartTablesOf(...).tables. Returns { ready: [table item], keep: [position] }.
+function splitEditedTables(dirty, tables, head, focusIn) {
+	const ready = [];
+	const keep = [];
+	for (const p of dirty) {
+		const item = tables.find((x) => p >= x.from && p <= x.to);
+		if (!item || ready.includes(item)) continue;
+		if ((head >= item.from && head <= item.to) || focusIn(item)) keep.push(p);
+		else ready.push(item);
+	}
+	return { ready, keep };
+}
+
+// While tabPadding is on: a smart table changed by anything but this plugin (typing, Obsidian's
+// table editor) is padded with tabs again once the cursor and the focus have left it, so the
+// spaces Obsidian's table editor writes do not stay. Tables only passed through stay as they are.
+const tabPadOnLeavePlugin = ViewPlugin.fromClass(
+	class {
+		constructor(view) {
+			this.view = view;
+			this.dirty = [];
+			this.onFocus = () => this.schedule();
+			view.dom.ownerDocument.addEventListener("focusin", this.onFocus);
+		}
+		update(u) {
+			if (u.docChanged) {
+				this.dirty = this.dirty.map((p) => u.changes.mapPos(p));
+				const own = u.transactions.some((tr) => tr.isUserEvent(TF_PAD) || tr.isUserEvent(TF_WRITE));
+				if (activeSettings.tabPadding && !own) {
+					const tables = smartTablesOf(u.state).tables;
+					u.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+						for (const item of tables) {
+							if (fromB <= item.to && toB >= item.from && !this.dirty.includes(item.from)) this.dirty.push(item.from);
+						}
+					});
+				}
+			}
+			if (u.selectionSet || u.focusChanged || u.docChanged) this.schedule();
+		}
+		schedule() {
+			if (this.dirty.length === 0) return;
+			clearTimeout(this.timer);
+			this.timer = setTimeout(() => this.check(), 300);
+		}
+		check() {
+			if (!activeSettings.tabPadding) {
+				this.dirty = [];
+				return;
+			}
+			const state = this.view.state;
+			const active = this.view.dom.ownerDocument.activeElement;
+			const focusIn = (item) => {
+				const native = nativeTableElement(this.view, item);
+				return !!(native && active && native.contains(active));
+			};
+			const { ready, keep } = splitEditedTables(this.dirty, smartTablesOf(state).tables, state.selection.main.head, focusIn);
+			this.dirty = keep;
+			if (ready.length === 0) return;
+			const { lines, changed } = tabPadTouchedTables(state.doc.toString().split("\n"), ready.map((x) => [x.t.headerLine, x.t.lastRowLine]));
+			if (changed.length === 0) return;
+			const changes = changed.map((ln) => {
+				const line = state.doc.line(ln + 1);
+				return { from: line.from, to: line.to, insert: lines[ln] };
+			});
+			this.view.dispatch({ changes, userEvent: TF_PAD });
+		}
+		destroy() {
+			clearTimeout(this.timer);
+			this.view.dom.ownerDocument.removeEventListener("focusin", this.onFocus);
+		}
+	}
+);
+
 /* --- find in note: show a hit inside a table --- */
 
 // Whether a decoration set has a range at pos (a widget over the table that holds pos).
@@ -1964,7 +2046,8 @@ class TableFieldsSettingTab extends PluginSettingTab {
 				"the |: text left-aligned (| text<Tab>|), number columns (currency, percentage, timespan " +
 				"or only numbers) right-aligned with spaces. Smaller files whose columns still line up " +
 				"in an elastic-tabstop (Rubberband) editor; the --- row keeps setting the display " +
-				"alignment. Tables the plugin does not write stay as they are."
+				"alignment. A table you edit (Obsidian's table editor pads it with spaces) gets its tabs " +
+				"back when you leave it. Tables you do not edit stay as they are."
 			)
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.tabPadding).onChange(async (value) => {

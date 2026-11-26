@@ -210,6 +210,12 @@ Every row is rewritten, including the header, the `---` row and the type and opt
 and so is the metadata table above it, if there is one.
 The cell change and the new padding are one step, so one undo reverts both.
 
+A table you edit yourself is rewritten too, once the cursor and the focus have left it.
+Obsidian's table editor, which opens when you click into a cell, pads every row with spaces
+and aligns the cells as the `---` row says;
+when you leave the table, Table Fields turns that padding back into tabs.
+This is a separate step: the first undo after leaving the table restores the spaces.
+
 ### How a cell is written
 
 - Every cell ends in **one tab before its `|`**, with one space after the opening `|`.
@@ -303,15 +309,10 @@ After a checkbox click, both tables are rewritten:
 
 ### What stays as it is
 
-- Tables the plugin does not write, also other tables in the same note.
+- Tables you neither edit nor change through the plugin, also when the cursor passes through them.
 - Plain Markdown tables without a type row, comment or metadata table.
-- Whatever you type yourself, also inside a Table Fields table,
-  until the plugin next writes that table.
 - Tables inside fenced code blocks, and a config comment above a table.
-
-Obsidian's own table editor, which opens when you click into a cell to type,
-may pad the rows it edits with spaces again.
-The next plugin write turns them back into tabs.
+- Tables edited in Reading view or by another program, until the plugin next writes them.
 
 ## Privacy & payment
 

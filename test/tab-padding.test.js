@@ -146,6 +146,40 @@ test("an untyped column of numbers sorts by value, - and empty cells last", () =
 	assert.deepStrictEqual(column(2, false), ["1", "2", "3", "7", "8", "9", "10", "x1"]);
 });
 
+test("a table Obsidian's table editor padded with spaces gets its tabs back", () => {
+	// As Obsidian writes it after a cell edit: spaces, aligned by the --- row.
+	const doc = [
+		"| casdfsadfsadfsadf | aasdfasdfasdfasfd | basdfasdfasdfsdf |",
+		"| ----------------: | ----------------: | ---------------- |",
+		"|            __text |        __currency | __text           |",
+		"|          sdfxdsgf |                 1 | u                |",
+		"|                 y |        3333333333 | v                |",
+	];
+	assert.deepStrictEqual(plain(tabPadTouchedTables(doc, [[0, 4]]).lines), [
+		"| casdfsadfsadfsadf\t| aasdfasdfasdfasfd\t| basdfasdfasdfsdf\t|",
+		"| ----------------:\t| ----------------:\t| ----------------\t|",
+		"| __text\t|        __currency\t| __text\t|",
+		"| sdfxdsgf\t|                 1\t| u\t|",
+		"| y\t|        3333333333\t| v\t|",
+	]);
+});
+
+test("an edited table is padded once the cursor and the focus have left it", () => {
+	const { splitEditedTables } = plugin;
+	const a = { from: 0, to: 50 };
+	const b = { from: 60, to: 90 };
+	const noFocus = () => false;
+	// Cursor in a: a waits, b is ready; a position outside every table is dropped.
+	let r = splitEditedTables([5, 70, 55], [a, b], 10, noFocus);
+	assert.deepStrictEqual(plain(r), { ready: [b], keep: [5] });
+	// Cursor outside, but the focus in Obsidian's editor of a: a still waits.
+	r = splitEditedTables([5], [a, b], 100, (x) => x === a);
+	assert.deepStrictEqual(plain(r), { ready: [], keep: [5] });
+	// Two positions in the same table give it once.
+	r = splitEditedTables([5, 6], [a], 100, noFocus);
+	assert.deepStrictEqual(plain(r), { ready: [a], keep: [] });
+});
+
 test("a delimiter cell is stretched with dashes, its colons kept", () => {
 	assert.strictEqual(tabPadRow("| --: | :-: | - |", new Map([[0, 6], [1, 5], [2, 4]]), true), "| -----:\t| :---:\t| ----\t|");
 });
