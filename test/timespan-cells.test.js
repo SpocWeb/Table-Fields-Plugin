@@ -51,7 +51,7 @@ test("data infers the timespan type, dates and plain numbers do not", () => {
 	assert.strictEqual(inferType("PT3h"), "timespan");
 	assert.strictEqual(inferType("12:34:56"), "timespan");
 	assert.strictEqual(inferType("2026-11-11_08:32"), "date");
-	assert.strictEqual(inferType("12"), "currency");
+	assert.strictEqual(inferType("12"), "int");
 });
 
 test("duration is an alias of timespan", () => {

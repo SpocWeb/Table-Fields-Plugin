@@ -178,6 +178,11 @@ That's it. Click your checkboxes and dropdowns; everything saves back into the n
 - **Money columns** — type a plain number; it's lined up on the right with two decimals,
   and with a currency symbol when the column's option row names a currency code such as `__EUR`.
   Without a code no symbol is shown, only the column's unit if it has one.
+- **Number columns** — `int` for whole numbers, `float` for decimals; both right-aligned with
+  thousands separators and sorted by value. A `float` column shows every value with as many
+  decimals as the value with the most (`1.5`, `12.25`, `0.125` show as `1.500`, `12.250`, `0.125`),
+  so the decimal separators line up; an option row such as `__2` fixes the count.
+  An `int` cell with decimals is shown as written.
 - **Percent columns** — kept as simple `60%` text, aligned for easy scanning.
 - **Date columns** — stored in a standard form, shown in your local date style.
 - **Right-click setup** — change any column's type or sort by it from the table itself, no config
@@ -222,9 +227,11 @@ This is a separate step: the first undo after leaving the table restores the spa
 - Every cell ends in **one tab before its `|`**, with one space after the opening `|`.
 - **Text is left-aligned**, also in a column the `---` row centers (`:---:`) or right-aligns (`---:`).
 - **Number columns are right-aligned** with spaces to the column's widest cell.
-  A column counts as a number column when its type is `currency`, `percentage` or `timespan`,
+  A column counts as a number column when its type is `int`, `float`, `currency`, `percentage` or `timespan`,
   or when all its data cells are numbers such as `12`, `4.2`, `1,5` or `60%`
   (`-` and empty cells do not count).
+  In a `float` column the decimal separators line up too: `|   1.5  →|`, `|  12.25 →|`, `|   0.125→|`;
+  the values themselves are never changed.
   The dashes of its `---` cell are stretched or shortened to the same width, its colons kept.
 - **An empty cell** is one space and the tab.
 - The `---` row still decides how Obsidian displays each column; only the source changes.

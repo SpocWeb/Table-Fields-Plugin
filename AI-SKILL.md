@@ -28,8 +28,8 @@ starts with `__`). They usually follow the header's `---` row, but sorting the t
 ```
 
 - **Type row**: the config row of type names, one per column: `text`, `box`, `select`, `date`,
-  `currency`, `percentage`. An empty cell means `text`, a lone `__` means `box`; `checkbox` is an
-  alias of `box`.
+  `int`, `float`, `currency`, `percentage`, `timespan`. An empty cell means `text`, a lone `__`
+  means `box`; `checkbox` is an alias of `box`.
 - **Option rows**: the other config rows, one option per row and column. For `select`, the
   allowed values; for `currency`, a single ISO currency code such as `USD`. Write a single `-` in a
   cell without an option, so an ascending sort keeps the option rows right below the type row
@@ -49,6 +49,8 @@ listing `{name, type, options}` per column in column order; read them the same w
 | select | the exact option text | `Doing` |
 | date | ISO `YYYY-MM-DD` | `2026-07-22` |
 | currency | a plain number, no symbol/commas | `1200.50` |
+| int | a whole number, no separators | `1234` |
+| float | a decimal number with a dot, no thousands separators; an option row of one digit (`__2`) fixes the decimals shown | `12.25` |
 | percentage | a number followed by `%` | `60%` |
 | timespan (alias `duration`) | `h:mm:ss` or an ISO 8601 duration without years and months | `12:34:56`, `PT3h`, `PT1H30M` |
 

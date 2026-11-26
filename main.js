@@ -95,7 +95,7 @@ function findCommentAbove(lines, headerLine) {
 }
 
 // Type names as written; `box` is the short name of `checkbox`, both are accepted.
-const FIELD_TYPES = ["text", "box", "checkbox", "select", "date", "currency", "percentage", "timespan", "duration"];
+const FIELD_TYPES = ["text", "box", "checkbox", "select", "date", "currency", "percentage", "timespan", "duration", "int", "float"];
 
 // The internal type of a written type name: lower case, `box` read as `checkbox`,
 // `duration` read as `timespan`.
@@ -274,8 +274,36 @@ function lastTableRow(lines, headerLine) {
 // configLines are the body lines holding config, not data (empty for the comment format);
 // typeLine is set for type rows, comment ({ start, end }) for the comment format,
 // meta ({ start, end }) for the metadata table, else null.
+// A float column also gets `decimals`: the decimal places all its cells are shown with.
 function resolveTable(lines, headerLine, lastRowLine) {
-	const meta = metaColumns(splitRowCells(lines[headerLine] || "")) ? null : findMetaTableAbove(lines, headerLine);
+	const resolved = resolveTableConfig(lines, headerLine, lastRowLine);
+	if (resolved) addFloatDecimals(lines, headerLine, lastRowLine, resolved);
+	return resolved;
+}
+
+// Sets `decimals` on every float column of a resolved table: a first option of one digit
+// (`__3`) wins, else the most decimal places of its number cells in the data rows.
+function addFloatDecimals(lines, headerLine, lastRowLine, resolved) {
+	const configLines = new Set(resolved.configLines || []);
+	resolved.config.cols.forEach((col, i) => {
+		if (col.type !== "float") return;
+		const fixed = col.options && /^\d$/.test(col.options[0] || "") ? Number(col.options[0]) : null;
+		let most = 0;
+		if (fixed === null) {
+			for (let ln = headerLine + 2; ln <= lastRowLine; ln++) {
+				if (configLines.has(ln)) continue;
+				const cell = splitRowCells(lines[ln])[i] || "";
+				const fraction = FLOAT_CELL_RE.test(cell) ? splitDecimal(cell)[1] : "";
+				most = Math.max(most, Math.max(0, fraction.length - 1));
+			}
+		}
+		col.decimals = fixed === null ? Math.min(most, 20) : fixed;
+	});
+}
+
+// The config of the table at headerLine..lastRowLine, as described at resolveTable.
+function resolveTableConfig(lines, headerLine, lastRowLine) {
+	const meta =metaColumns(splitRowCells(lines[headerLine] || "")) ? null : findMetaTableAbove(lines, headerLine);
 	const metaRange = meta ? { start: meta.start, end: meta.end } : null;
 	const rows = parseTypeRows(lines, headerLine, lastRowLine, meta !== null);
 	if (rows) {
@@ -739,6 +767,16 @@ module.exports = class MarkdownSmartTablesPlugin extends Plugin {
 				td.classList.add("tf-cell-right");
 				break;
 			}
+			case "int":
+			case "float": {
+				const formatted = col.type === "int" ? formatIntCell(raw) : formatFloatCell(raw, col.decimals);
+				if (formatted != null) {
+					td.textContent = formatted;
+					td.setAttr("title", raw);
+				}
+				td.classList.add("tf-cell-right");
+				break;
+			}
 			case "date": {
 				const formatted = formatDate(raw);
 				if (formatted != null) {
@@ -915,8 +953,9 @@ function fillDelimiterCell(cell, width) {
 
 // A table row with its padding replaced. Every cell closed by a pipe ends in one tab before the
 // pipe. A text cell is one space and its trimmed text, whatever the --- row's alignment; a cell of
-// a right-aligned column (rightWidths: column index -> width) is one space and its text padded on
-// the left with spaces to the width (a --- cell stretched with dashes when `delimiter`); an empty
+// a right-aligned column (rightWidths: column index -> width, or { width, align } where align(text)
+// gives the decimal-aligned text or null) is one space and its text padded on the left with spaces
+// to the width (a --- cell stretched with dashes when `delimiter`); an empty
 // cell is one space. Whitespace-only text before the first pipe (indentation) and after the last
 // pipe (a trailing \r) stays; a last cell without a closing pipe gets no tab.
 function tabPadRow(line, rightWidths = null, delimiter = false) {
@@ -931,9 +970,12 @@ function tabPadRow(line, rightWidths = null, delimiter = false) {
 	const tail = line.slice(from);
 	const leading = segs[0].trim() === "";
 	const cellText = (text, k) => {
-		const width = rightWidths && text !== "" ? rightWidths.get(leading ? k - 1 : k) : undefined;
-		if (width === undefined) return text;
-		return delimiter ? fillDelimiterCell(text, width) : text.padStart(width);
+		const spec = rightWidths && text !== "" ? rightWidths.get(leading ? k - 1 : k) : undefined;
+		if (spec === undefined) return text;
+		const width = typeof spec === "number" ? spec : spec.width;
+		if (delimiter) return fillDelimiterCell(text, width);
+		const aligned = typeof spec === "number" || !spec.align ? null : spec.align(text);
+		return (aligned === null ? text : aligned).padStart(width);
 	};
 	const out = segs.map((s, k) => {
 		if (k === 0) return leading ? s : s.match(/^\s*/)[0] + cellText(s.trim(), 0) + "\t";
@@ -944,7 +986,7 @@ function tabPadRow(line, rightWidths = null, delimiter = false) {
 }
 
 // Types whose columns are written right-aligned with tab padding.
-const NUMBER_TYPES = ["currency", "percentage", "timespan"];
+const NUMBER_TYPES = ["int", "float", "currency", "percentage", "timespan"];
 
 // A data cell that makes an untyped column a number column: a number, optionally signed, with
 // . or , separators and an optional %.
@@ -954,16 +996,46 @@ const NUMBER_CELL_RE = /^[+-]?(\d+([.,]\d+)*|[.,]\d+)%?$/;
 // without one, a single comma followed by other than three digits is the decimal mark (1,5),
 // other commas group thousands (1,200 and 1,200,000).
 function cellNumber(s) {
-	let t = s.replace(/%$/, "");
-	if (!t.includes(".") && /^[^,]*,(\d{1,2}|\d{4,})$/.test(t)) t = t.replace(",", ".");
-	return Number(t.replace(/,/g, ""));
+	const [whole, fraction] = splitDecimal(s.replace(/%$/, ""));
+	return Number(whole.replace(/,/g, "") + (fraction ? "." + fraction.slice(1) : ""));
+}
+
+// A number's text split at its decimal mark: [whole part, mark and decimals or ""]. The mark is
+// the last dot, else a single comma followed by other than three digits (as in cellNumber).
+function splitDecimal(text) {
+	const dot = text.lastIndexOf(".");
+	if (dot >= 0) return [text.slice(0, dot), text.slice(dot)];
+	if (/^[^,]*,(\d{1,2}|\d{4,})$/.test(text)) {
+		const comma = text.indexOf(",");
+		return [text.slice(0, comma), text.slice(comma)];
+	}
+	return [text, ""];
+}
+
+// An int cell: a whole number, optionally signed. A float cell: any number without %.
+const INT_CELL_RE = /^[+-]?\d+$/;
+const FLOAT_CELL_RE = /^[+-]?(\d+([.,]\d+)*|[.,]\d+)$/;
+
+// An int cell as shown (locale grouping), or null when it is not a whole number.
+function formatIntCell(raw) {
+	if (!INT_CELL_RE.test(raw)) return null;
+	return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Number(raw));
+}
+
+// A float cell as shown with `decimals` places and locale grouping, or null when not a number.
+function formatFloatCell(raw, decimals) {
+	if (!FLOAT_CELL_RE.test(raw)) return null;
+	const d = decimals || 0;
+	return new Intl.NumberFormat(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }).format(cellNumber(raw));
 }
 
 // The tab-padded lines start..end (header, --- row, body) of one table, as a Map line -> text.
 // A column is right-aligned when its index is in `typedRight` or all its non-empty data cells
 // (body lines not in `configLines`, - counted as empty) are numbers; its width is the longest
 // cell of the header and body, at least the --- cell's colons plus three dashes.
-function tabPadTableLines(lines, start, end, typedRight, configLines) {
+// In a column of `decimalCols` (float) the number cells are also decimal-aligned: whole parts
+// right-aligned, decimal marks in one place, decimals padded on the right with spaces.
+function tabPadTableLines(lines, start, end, typedRight, configLines, decimalCols = new Set()) {
 	const cells = new Map();
 	for (let ln = start; ln <= end; ln++) cells.set(ln, splitRowCells(lines[ln]));
 	const columns = Math.max(0, ...Array.from(cells.values(), (c) => c.length));
@@ -984,7 +1056,25 @@ function tabPadTableLines(lines, start, end, typedRight, configLines) {
 		for (let ln = start; ln <= end; ln++) {
 			if (ln !== start + 1) width = Math.max(width, (cells.get(ln)[i] || "").length);
 		}
-		rightWidths.set(i, width);
+		if (!decimalCols.has(i)) {
+			rightWidths.set(i, width);
+			continue;
+		}
+		let wholeWidth = 0;
+		let fractionWidth = 0;
+		for (let ln = start + 2; ln <= end; ln++) {
+			const c = cells.get(ln)[i] || "";
+			if (configLines.has(ln) || !FLOAT_CELL_RE.test(c)) continue;
+			const [whole, fraction] = splitDecimal(c);
+			wholeWidth = Math.max(wholeWidth, whole.length);
+			fractionWidth = Math.max(fractionWidth, fraction.length);
+		}
+		const align = (text) => {
+			if (!FLOAT_CELL_RE.test(text)) return null;
+			const [whole, fraction] = splitDecimal(text);
+			return whole.padStart(wholeWidth) + fraction.padEnd(fractionWidth);
+		};
+		rightWidths.set(i, { width: Math.max(width, wholeWidth + fractionWidth), align });
 	}
 	const out = new Map();
 	for (let ln = start; ln <= end; ln++) out.set(ln, tabPadRow(lines[ln], rightWidths, ln === start + 1));
@@ -1007,7 +1097,11 @@ function tabPadTouchedTables(lines, touched) {
 		t.config.cols.forEach((c, i) => {
 			if (NUMBER_TYPES.includes(c.type)) typedRight.add(i);
 		});
-		const padded = [tabPadTableLines(lines, t.headerLine, t.lastRowLine, typedRight, new Set(t.configLines))];
+		const floats = new Set();
+		t.config.cols.forEach((c, i) => {
+			if (c.type === "float") floats.add(i);
+		});
+		const padded = [tabPadTableLines(lines, t.headerLine, t.lastRowLine, typedRight, new Set(t.configLines), floats)];
 		if (t.meta) padded.push(tabPadTableLines(lines, t.meta.start, t.meta.end, new Set(), new Set()));
 		for (const m of padded) {
 			for (const [ln, text] of m) {
@@ -1047,7 +1141,8 @@ function inferType(sample) {
 	if (DATE_RE.test(sample)) return "date";
 	if (parseTimespan(sample) !== null) return "timespan";
 	if (/^\d+(\.\d+)?%$/.test(sample)) return "percentage";
-	if (/^\d+(\.\d+)?$/.test(sample)) return "currency";
+	if (INT_CELL_RE.test(sample)) return "int";
+	if (FLOAT_CELL_RE.test(sample)) return "float";
 	return "text";
 }
 
@@ -1118,6 +1213,9 @@ function compareCellValues(a, b, col) {
 		const na = Number(a.replace(/[%, ]/g, ""));
 		const nb = Number(b.replace(/[%, ]/g, ""));
 		if (isFinite(na) && isFinite(nb)) return na - nb;
+	}
+	if ((type === "int" || type === "float") && FLOAT_CELL_RE.test(a) && FLOAT_CELL_RE.test(b)) {
+		return cellNumber(a) - cellNumber(b);
 	}
 	if (type === "timespan") {
 		const ta = parseTimespan(a);
@@ -1219,6 +1317,14 @@ function renderWidgetCell(td, col, cell, view, md) {
 		}
 		case "percentage": {
 			td.textContent = raw;
+			td.classList.add("tf-cell-right");
+			break;
+		}
+		case "int":
+		case "float": {
+			const f = col.type === "int" ? formatIntCell(raw) : formatFloatCell(raw, col.decimals);
+			td.textContent = f != null ? f : raw;
+			if (f != null) td.setAttr("title", raw);
 			td.classList.add("tf-cell-right");
 			break;
 		}
@@ -1402,7 +1508,7 @@ class SmartTableWidget extends WidgetType {
 		menu.addSeparator();
 		menu.addItem((i) => i.setTitle("Column: " + col.name).setDisabled(true));
 		menu.addSeparator();
-		const types = ["text", "box", "select", "date", "currency", "percentage", "timespan"];
+		const types = ["text", "box", "select", "date", "int", "float", "currency", "percentage", "timespan"];
 		for (const ty of types) {
 			menu.addItem((item) => {
 				item
@@ -1875,6 +1981,9 @@ function buildUsageMd(img) {
 	"- **select** — a dropdown; the choices come from the column's options list.",
 	"- **date** — stored as YYYY-MM-DD, shown in your local date style.",
 	"- **currency** — a plain number (e.g. 1200.00); the symbol comes from options (e.g. EUR), none without one.",
+	"- **int** — a whole number, shown with thousands separators, right-aligned, sorted by value.",
+	"- **float** — a decimal number; every cell shows as many decimals as the one with the most",
+	"  (or as an option like __2 says), so the decimal separators line up.",
 	"- **percentage** — kept as simple NN% text, right-aligned.",
 	"- **timespan** (or **duration**) — written as h:mm:ss or as an ISO duration like PT3h or PT1H30M;",
 	"  shown as [w-][d_]hh:mm:ss (2w-3d_04:05:06), right-aligned, sorted by length. The text stays as written.",
@@ -1911,10 +2020,12 @@ const SKILL_TEXT = [
 	"    | -      | __Done   | -      | -          | -     |",
 	"    | ...    | ...      | ...    | ...        | ...   |",
 	"",
-	"- Type row: the config row of type names, one per column: text, box, select, date, currency,",
-	"  percentage. An empty cell means text, a lone __ means box; checkbox is an alias of box.",
+	"- Type row: the config row of type names, one per column: text, box, select, date, int, float,",
+	"  currency, percentage, timespan. An empty cell means text, a lone __ means box; checkbox is an",
+	"  alias of box.",
 	"- Option rows: the other config rows, one option per row and column. For select, the allowed",
-	"  values; for currency, a single ISO currency code such as USD. Write a single - in a cell",
+	"  values; for currency, a single ISO currency code such as USD; for float, optionally one digit,",
+	"  the decimal places shown (e.g. __2). Write a single - in a cell",
 	"  without an option, so an ascending sort keeps the option rows right below the type row",
 	"  (older tables leave such cells empty). Write a | inside an option as \\|.",
 	"- All other rows are data rows. Never add a second --- row: Obsidian deletes it.",
@@ -1928,6 +2039,8 @@ const SKILL_TEXT = [
 	"- select: the exact option text. Example: Doing",
 	"- date: ISO date YYYY-MM-DD. Example: 2026-07-22",
 	"- currency: a plain number, no symbol or commas. Example: 1200.50",
+	"- int: a whole number, no separators. Example: 1234",
+	"- float: a decimal number with a dot, no thousands separators. Example: 12.25",
 	"- percentage: a number followed by a percent sign. Example: 60%",
 	"- timespan (alias duration): h:mm:ss or an ISO 8601 duration without years and months. Examples: 12:34:56, PT3h, PT1H30M, P1DT12H",
 	"Values are stored in this plain, canonical form; the plugin only formats them on screen.",
@@ -2047,7 +2160,7 @@ class TableFieldsSettingTab extends PluginSettingTab {
 			.setDesc(
 				"When Table Fields writes a table (checkbox, dropdown, sort, type change, mark command), " +
 				"every row of that table, header and --- row included, ends each cell in one tab before " +
-				"the |: text left-aligned (| text<Tab>|), number columns (currency, percentage, timespan " +
+				"the |: text left-aligned (| text<Tab>|), number columns (int, float, currency, percentage, timespan " +
 				"or only numbers) right-aligned with spaces. Smaller files whose columns still line up " +
 				"in an elastic-tabstop (Rubberband) editor; the --- row keeps setting the display " +
 				"alignment. A table you edit (Obsidian's table editor pads it with spaces) gets its tabs " +
