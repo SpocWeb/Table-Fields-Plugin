@@ -165,6 +165,8 @@ immediately, leave the note and open it again to refresh the rendered dropdown.
    rows stay at the top; the data rows are ordered by the column's type (numbers by value, dates
    by date, unchecked boxes before checked ones, dropdown values in the order of their options),
    and empty cells go last.
+   A column without a type whose cells are all numbers (like `4.2`, `1,5`, `60%`) also sorts by value,
+   with `-` cells last.
 
 That's it. Click your checkboxes and dropdowns; everything saves back into the note automatically.
 

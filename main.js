@@ -946,6 +946,15 @@ const NUMBER_TYPES = ["currency", "percentage", "timespan"];
 // . or , separators and an optional %.
 const NUMBER_CELL_RE = /^[+-]?(\d+([.,]\d+)*|[.,]\d+)%?$/;
 
+// The value of a NUMBER_CELL_RE cell, % ignored. With a dot, commas group thousands (1,200.50);
+// without one, a single comma followed by other than three digits is the decimal mark (1,5),
+// other commas group thousands (1,200 and 1,200,000).
+function cellNumber(s) {
+	let t = s.replace(/%$/, "");
+	if (!t.includes(".") && /^[^,]*,(\d{1,2}|\d{4,})$/.test(t)) t = t.replace(",", ".");
+	return Number(t.replace(/,/g, ""));
+}
+
 // The tab-padded lines start..end (header, --- row, body) of one table, as a Map line -> text.
 // A column is right-aligned when its index is in `typedRight` or all its non-empty data cells
 // (body lines not in `configLines`, - counted as empty) are numbers; its width is the longest
@@ -1134,9 +1143,17 @@ function sortTableRows(lines, table, colIndex, descending) {
 	}
 	const valueOf = (line) => unescapePipes(splitRowCells(line)[colIndex] || "");
 	const keyed = data.map((line) => ({ line, value: valueOf(line) }));
+	// An untyped column whose data cells are all numbers (as for tab padding) sorts by value; - is empty there.
+	const filled = keyed.filter((k) => k.value !== "" && k.value !== NO_OPTION);
+	const numeric = (!col || col.type === "text") && filled.length > 0 && filled.every((k) => NUMBER_CELL_RE.test(k.value));
+	if (numeric) {
+		keyed.forEach((k) => {
+			if (k.value === NO_OPTION) k.value = "";
+		});
+	}
 	keyed.sort((x, y) => {
 		if (x.value === "" || y.value === "") return (x.value === "") - (y.value === "");
-		const c = compareCellValues(x.value, y.value, col);
+		const c = numeric ? cellNumber(x.value) - cellNumber(y.value) : compareCellValues(x.value, y.value, col);
 		return descending ? -c : c;
 	});
 	return head.map((ln) => lines[ln]).concat(keyed.map((k) => k.line));

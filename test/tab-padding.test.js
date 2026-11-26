@@ -135,6 +135,17 @@ test("number columns of a padded table still sort by value, and the padding surv
 	assert.deepStrictEqual(plain(tabPadTouchedTables(sorted, [[3, 3]]).changed), []);
 });
 
+test("an untyped column of numbers sorts by value, - and empty cells last", () => {
+	const doc = ["| Name | Qty | Code |", "| --- | --- | --- |", "| __text | | |",
+		"| a | 4.2 | 7 |", "| b | 12 | x1 |", "| c | 4.10 | 9 |", "| d | - | 10 |", "| e | -3 | 8 |", "| f | 1,5 | 2 |", "| g | 1,200 | 1 |", "| h | | 3 |"];
+	const t = plugin.findSmartTables(doc.join("\n"))[0];
+	const column = (c, desc) => Array.from(plugin.sortTableRows(doc, t, c, desc)).slice(1).map((r) => plugin.splitRowCells(r)[c]);
+	assert.deepStrictEqual(column(1, false), ["-3", "1,5", "4.10", "4.2", "12", "1,200", "-", ""]);
+	assert.deepStrictEqual(column(1, true), ["1,200", "12", "4.2", "4.10", "1,5", "-3", "-", ""]);
+	// Code holds x1, so it stays a text column: digit runs compared, x1 after the numbers.
+	assert.deepStrictEqual(column(2, false), ["1", "2", "3", "7", "8", "9", "10", "x1"]);
+});
+
 test("a delimiter cell is stretched with dashes, its colons kept", () => {
 	assert.strictEqual(tabPadRow("| --: | :-: | - |", new Map([[0, 6], [1, 5], [2, 4]]), true), "| -----:\t| :---:\t| ----\t|");
 });
