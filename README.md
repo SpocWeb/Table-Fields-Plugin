@@ -190,25 +190,126 @@ the Table Fields syntax and can read, create, and edit your tables for you.
 
 ## Tab padding keeps tables small and aligned in elastic-tabstop editors
 
-Turn on **Settings → Table Fields → Options → Tab before each cell's closing pipe**
-(off by default).
-From then on, every table Table Fields writes
-(a checkbox click, a dropdown choice, a sort, a type change, the mark command)
-is rewritten as a whole, header and `---` row included:
-each cell ends in one tab before its `|` instead of a run of spaces.
-Text is left-aligned, also in a centered or right-aligned column;
-number columns (currency, percentage, timespan, or columns holding only numbers)
-are right-aligned with spaces to their widest cell, their `---` cell filled with dashes.
+Obsidian and most table plugins pad every cell with spaces up to the column's width.
+That keeps a table readable in a plain text editor, but every edit of a long value
+re-pads the whole column, and the spaces can make up a large part of the file.
+Instead, an elastic-tabstop editor such as Rubberband lines up cells that end in a tab.
+Table Fields can write its tables in that form.
 
-```text
-| Name<TAB>| Amount<TAB>| Note<TAB>|
-| :--:<TAB>| -----:<TAB>| ---<TAB>|
-| ab<TAB>|  12.50<TAB>| x<TAB>|
+Turn it on in **Settings → Table Fields → Options → Tab before each cell's closing pipe**.
+It is off by default.
+
+### What gets rewritten
+
+Whenever Table Fields itself writes a table, it rewrites that whole table:
+a checkbox click or a dropdown choice (Live Preview and Reading view),
+a sort, a type change from the header menu, and the **Mark table** command.
+Every row is rewritten, including the header, the `---` row and the type and option rows,
+and so is the metadata table above it, if there is one.
+The cell change and the new padding are one step, so one undo reverts both.
+
+### How a cell is written
+
+- Every cell ends in **one tab before its `|`**, with one space after the opening `|`.
+- **Text is left-aligned**, also in a column the `---` row centers (`:---:`) or right-aligns (`---:`).
+- **Number columns are right-aligned** with spaces to the column's widest cell.
+  A column counts as a number column when its type is `currency`, `percentage` or `timespan`,
+  or when all its data cells are numbers such as `12`, `4.2`, `1,5` or `60%`
+  (`-` and empty cells do not count).
+  The dashes of its `---` cell are stretched or shortened to the same width, its colons kept.
+- **An empty cell** is one space and the tab.
+- The `---` row still decides how Obsidian displays each column; only the source changes.
+
+### Example: a typed table
+
+In the examples, `→` stands for one tab character.
+This table is padded with spaces, as Obsidian writes it:
+
+```markdown
+| Task           | Status   | Amount     | Share   | Done |
+| :------------: | -------- | ---------: | ------- | ---- |
+| __text         | __select | __currency | __percentage | __ |
+| -              | __Todo   | __EUR      | -       | -    |
+| -              | __Done   | -          | -       | -    |
+| Draft PRD      | Done     | 1200.00    | 60%     | [x]  |
+| Review designs | Todo     | 59.5       |         | [ ]  |
 ```
 
-The `---` row still decides how Obsidian displays each column.
-Files get smaller, and an elastic-tabstop editor such as Rubberband lines the columns up.
-Tables the plugin does not write keep their padding.
+After a checkbox click, the file holds:
+
+```text
+| Task→| Status→|     Amount→|        Share→| Done→|
+| :------------:→| --------→| ---------:→| ------------→| ----→|
+| __text→| __select→| __currency→| __percentage→| __→|
+| -→| __Todo→|      __EUR→|            -→| -→|
+| -→| __Done→|          -→|            -→| -→|
+| Draft PRD→| Done→|    1200.00→|          60%→| [x]→|
+| Review designs→| Todo→|       59.5→| →| [ ]→|
+```
+
+`Task` stays left-aligned although its `---` cell centers it.
+`Amount` (currency) and `Share` (percentage) are right-aligned to their widest cell,
+which here is the type cell.
+The table shrinks from 422 to 369 characters.
+An elastic-tabstop editor shows it as:
+
+```text
+| Task           | Status   |     Amount |        Share | Done |
+| :------------: | -------- | ---------: | ------------ | ---- |
+| __text         | __select | __currency | __percentage | __   |
+| -              | __Todo   |      __EUR |            - | -    |
+| -              | __Done   |          - |            - | -    |
+| Draft PRD      | Done     |    1200.00 |          60% | [x]  |
+| Review designs | Todo     |       59.5 |              | [ ]  |
+```
+
+### Example: number columns found by their values, and a metadata table
+
+Here the data table has no type row; its types come from the metadata table above it:
+
+```markdown
+| Column | Type   | Unit | Scale | Description      |
+|--------|--------|------|------:|------------------|
+| Cost   |        | EUR  |  1000 | cost of all runs |
+| Done   | box    |      |       | reviewed by me   |
+
+| Run    | Cost | Code | Done |
+|--------|-----:|------|------|
+| first  |  4.2 | 7    | [ ]  |
+| second | 12   | x1   | [x]  |
+| third  | -    | 9    | [ ]  |
+```
+
+After a checkbox click, both tables are rewritten:
+
+```text
+| Column→| Type→| Unit→| Scale→| Description→|
+| --------→| --------→| ------→| ----:→| ------------------→|
+| Cost→| →| EUR→|  1000→| cost of all runs→|
+| Done→| box→| →| →| reviewed by me→|
+
+| Run→| Cost→| Code→| Done→|
+| -------→| ---:→| ------→| ------→|
+| first→|  4.2→| 7→| [ ]→|
+| second→|   12→| x1→| [x]→|
+| third→|    -→| 9→| [ ]→|
+```
+
+`Cost` holds only numbers (and a `-`), so it is right-aligned although it has no type.
+`Scale` in the metadata table is right-aligned for the same reason.
+`Code` stays left-aligned because `x1` is not a number.
+
+### What stays as it is
+
+- Tables the plugin does not write, also other tables in the same note.
+- Plain Markdown tables without a type row, comment or metadata table.
+- Whatever you type yourself, also inside a Table Fields table,
+  until the plugin next writes that table.
+- Tables inside fenced code blocks, and a config comment above a table.
+
+Obsidian's own table editor, which opens when you click into a cell to type,
+may pad the rows it edits with spaces again.
+The next plugin write turns them back into tabs.
 
 ## Privacy & payment
 

@@ -114,6 +114,27 @@ test("a right-aligned table is unchanged by a second pass and still parses", () 
 	assert.deepStrictEqual(Array.from(t.config.cols[1].options), ["EUR"]);
 });
 
+test("number columns of a padded table still sort by value, and the padding survives the sort", () => {
+	const doc = [
+		"| Name | Amount | Share | Time |",
+		"| --- | ---: | --- | --- |",
+		"| __text | __currency | __percentage | __timespan |",
+		"| a | 1200.00 | 60% | 1:00:00 |",
+		"| b | 59.5 | 5% | PT3h |",
+		"| c | 100 | 100% | 0:05:00 |",
+		"| d | | 7% | PT1M |",
+		"| e | 9 | 15% | 2:00:00 |",
+	];
+	const padded = tabPadTouchedTables(doc, [[3, 3]]).lines;
+	const t = plugin.findSmartTables(padded.join("\n"))[0];
+	const column = (c) => Array.from(plugin.sortTableRows(padded, t, c, false)).slice(1).map((r) => plugin.splitRowCells(r)[c] || "");
+	assert.deepStrictEqual(column(1), ["9", "59.5", "100", "1200.00", ""]);
+	assert.deepStrictEqual(column(2), ["5%", "7%", "15%", "60%", "100%"]);
+	assert.deepStrictEqual(column(3), ["PT1M", "0:05:00", "1:00:00", "2:00:00", "PT3h"]);
+	const sorted = padded.slice(0, 2).concat(Array.from(plugin.sortTableRows(padded, t, 1, false)));
+	assert.deepStrictEqual(plain(tabPadTouchedTables(sorted, [[3, 3]]).changed), []);
+});
+
 test("a delimiter cell is stretched with dashes, its colons kept", () => {
 	assert.strictEqual(tabPadRow("| --: | :-: | - |", new Map([[0, 6], [1, 5], [2, 4]]), true), "| -----:\t| :---:\t| ----\t|");
 });
